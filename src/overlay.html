@@ -180,6 +180,7 @@
   const MAX_DURATION_MS = 60000; // 1 minute max
 
   let hideTimer = null;
+  let gifLoopTimer = null;
   let queue = [];
   let playing = false;
   let currentMediaEl = null;
@@ -206,6 +207,7 @@
 
   function clearStage() {
     pauseCurrentMedia();
+    if (gifLoopTimer) { clearInterval(gifLoopTimer); gifLoopTimer = null; }
     currentMediaEl = null;
     currentMediaKind = null;
     mediaInner.innerHTML = '';
@@ -278,6 +280,15 @@
       img.src = mediaUrl;
       mediaInner.appendChild(img);
       currentMediaEl = img;
+      // Force la repetition des GIFs (certains GIFs ne loopent pas tout seuls)
+      if (/\.gif(\?|#|$)/i.test(mediaUrl)) {
+        let n = 0;
+        gifLoopTimer = setInterval(() => {
+          if (!img.parentNode) { clearInterval(gifLoopTimer); gifLoopTimer = null; return; }
+          n++;
+          img.src = mediaUrl + (mediaUrl.includes('?') ? '&' : '?') + '_gl=' + n;
+        }, 4000);
+      }
       return;
     }
 

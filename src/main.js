@@ -171,11 +171,15 @@ function positionOverlay(position) {
   overlayWindow.setPosition(x, y);
 }
 
-function showMeme({ mediaUrl, mediaKind, text, author }) {
+function showMeme({ mediaUrl, mediaKind, text, author, customDuration }) {
   if (store.get('disabled')) return; // user a coupe la reception
   if (!overlayWindow) createOverlayWindow();
   positionOverlay(store.get('overlayPosition'));
-  const duration = store.get('overlayDurationMs');
+  // duration custom (commande Discord ":15") override la config locale, capee a 60s
+  const baseDuration = customDuration && customDuration > 0
+    ? Math.min(60000, customDuration)
+    : store.get('overlayDurationMs');
+  const duration = baseDuration;
   const muted = !!store.get('muted');
   const volume = Math.max(0, Math.min(100, Number(store.get('volume')) || 0));
 
@@ -262,7 +266,8 @@ function connectWs() {
           mediaUrl: msg.mediaUrl,
           mediaKind: msg.mediaKind,
           text: msg.text,
-          author: msg.author
+          author: msg.author,
+          customDuration: msg.duration || null
         });
       }
     } catch (_) {}

@@ -235,19 +235,39 @@ function cleanTextFromUrl(text, url) {
   return text.replace(url, '').replace(/\s+/g, ' ').trim();
 }
 
+// Parse une commande de duree custom en fin de texte: ":15", ":15s", ":60s"
+// Retourne { text: texteNettoye, duration: msNumber | null }. Cap a 60s.
+function parseCustomDuration(text) {
+  if (!text) return { text: text || '', duration: null };
+  const re = /\s*:(\d{1,2})s?\s*$/i;
+  const m = text.match(re);
+  if (!m) return { text, duration: null };
+  const n = parseInt(m[1], 10);
+  if (isNaN(n) || n < 1) return { text, duration: null };
+  const duration = Math.min(60, n) * 1000;
+  const cleaned = text.replace(re, '').trim();
+  return { text: cleaned, duration };
+}
+
 async function handleIncomingMessage(message) {
   const room = findRoomByChannelId(message.channelId);
   if (!room) return; // ce channel n'est pas mappe a une room
 
-  const text = (message.content || '').trim();
+  const rawText = (message.content || '').trim();
+  const parsed = parseCustomDuration(rawText);
+  const text = parsed.text;
+  const customDuration = parsed.duration; // ms ou null
   const author = {
     name: message.member?.displayName || message.author.globalName || message.author.username,
     avatarUrl: message.author.displayAvatarURL({ size: 128, extension: 'png' })
   };
 
+  // helper pour construire le payload meme avec la duration custom propagee
+  const meme = (extra) => ({ type: 'meme', author, duration: customDuration, ...extra });
+
   const fromAttach = pickMediaFromAttachments(message.attachments);
   if (fromAttach) {
-    broadcastToRoom(room.code, { type: 'meme', mediaUrl: fromAttach.url, mediaKind: fromAttach.kind, text, author });
+    broadcastToRoom(room.code, meme({ mediaUrl: fromAttach.url, mediaKind: fromAttach.kind, text }));
     return;
   }
 
@@ -257,12 +277,12 @@ async function handleIncomingMessage(message) {
     if (TIKTOK_LONG_RE.test(u) || TIKTOK_SHORT_RE.test(u)) {
       const mp4 = await resolveTikTokDirectMp4(u);
       if (mp4) {
-        broadcastToRoom(room.code, { type: 'meme', mediaUrl: mp4, mediaKind: 'video', text: cleanTextFromUrl(text, u), author });
+        broadcastToRoom(room.code, meme({ mediaUrl: mp4, mediaKind: 'video', text: cleanTextFromUrl(text, u) }));
         return;
       }
       const ttId = TIKTOK_LONG_RE.test(u) ? extractTikTokId(u) : await resolveTikTokShortUrl(u);
       if (ttId) {
-        broadcastToRoom(room.code, { type: 'meme', mediaUrl: ttId, mediaKind: 'tiktok', text: cleanTextFromUrl(text, u), author });
+        broadcastToRoom(room.code, meme({ mediaUrl: ttId, mediaKind: 'tiktok', text: cleanTextFromUrl(text, u) }));
         return;
       }
     }
@@ -271,7 +291,7 @@ async function handleIncomingMessage(message) {
     if (INSTAGRAM_RE.test(u)) {
       const ig = await resolveInstagramMedia(u);
       if (ig) {
-        broadcastToRoom(room.code, { type: 'meme', mediaUrl: ig.url, mediaKind: ig.kind, text: cleanTextFromUrl(text, u), author });
+        broadcastToRoom(room.code, meme({ mediaUrl: ig.url, mediaKind: ig.kind, text: cleanTextFromUrl(text, u) }));
         return;
       }
     }
@@ -280,14 +300,14 @@ async function handleIncomingMessage(message) {
     if (TWITTER_RE.test(u)) {
       const tw = await resolveTwitterMedia(u);
       if (tw) {
-        broadcastToRoom(room.code, { type: 'meme', mediaUrl: tw.url, mediaKind: tw.kind, text: cleanTextFromUrl(text, u), author });
+        broadcastToRoom(room.code, meme({ mediaUrl: tw.url, mediaKind: tw.kind, text: cleanTextFromUrl(text, u) }));
         return;
       }
     }
 
     const m = pickMediaFromUrl(u);
     if (m) {
-      broadcastToRoom(room.code, { type: 'meme', mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u), author });
+      broadcastToRoom(room.code, meme({ mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u) }));
       return;
     }
   }
@@ -295,13 +315,11 @@ async function handleIncomingMessage(message) {
   const fromEmbedNow = pickMediaFromEmbeds(message.embeds);
   if (fromEmbedNow) {
     const usedUrl = urls[0];
-    broadcastToRoom(room.code, {
-      type: 'meme',
+    broadcastToRoom(room.code, meme({
       mediaUrl: fromEmbedNow.url,
       mediaKind: fromEmbedNow.kind,
-      text: usedUrl ? cleanTextFromUrl(text, usedUrl) : text,
-      author
-    });
+      text: usedUrl ? cleanTextFromUrl(text, usedUrl) : text
+    }));
     return;
   }
 
@@ -311,13 +329,11 @@ async function handleIncomingMessage(message) {
       const m = pickMediaFromEmbeds(newMsg.embeds);
       if (m) {
         cleanup();
-        broadcastToRoom(room.code, {
-          type: 'meme',
+        broadcastToRoom(room.code, meme({
           mediaUrl: m.url,
           mediaKind: m.kind,
-          text: cleanTextFromUrl(text, urls[0]),
-          author
-        });
+          text: cleanTextFromUrl(text, urls[0])
+        }));
       }
     };
     const cleanup = () => {
@@ -326,13 +342,13 @@ async function handleIncomingMessage(message) {
     };
     const timer = setTimeout(() => {
       cleanup();
-      if (text) broadcastToRoom(room.code, { type: 'meme', mediaUrl: null, mediaKind: null, text, author });
+      if (text) broadcastToRoom(room.code, meme({ mediaUrl: null, mediaKind: null, text }));
     }, 5000);
     if (discordClient) discordClient.on('messageUpdate', onUpdate);
     return;
   }
 
-  if (text) broadcastToRoom(room.code, { type: 'meme', mediaUrl: null, mediaKind: null, text, author });
+  if (text) broadcastToRoom(room.code, meme({ mediaUrl: null, mediaKind: null, text }));
 }
 
 function setStatus(status, tag = '') {
