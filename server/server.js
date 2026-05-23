@@ -99,22 +99,42 @@ async function resolveTikTokShortUrl(shortUrl) {
   }
 }
 
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
 // Recupere l'URL directe MP4 d'une video TikTok via l'API publique tikwm.com.
-// Permet de jouer le TikTok comme une video HTML5 normale (sans iframe ni cookie wall).
-// Renvoie null si echec (rate limit, video privee, etc.) - le client tombera sur iframe.
-async function resolveTikTokDirectMp4(originalUrl) {
-  try {
-    const apiUrl = 'https://tikwm.com/api/?url=' + encodeURIComponent(originalUrl);
-    const res = await fetch(apiUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MemeDrop)' }
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const play = data && data.data && (data.data.play || data.data.wmplay);
-    return play || null;
-  } catch (_) {
-    return null;
+// Retries jusqu'a `attempts` fois en cas de rate limit ou erreur reseau.
+async function resolveTikTokDirectMp4(originalUrl, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const apiUrl = 'https://tikwm.com/api/?url=' + encodeURIComponent(originalUrl);
+      const res = await fetch(apiUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MemeDrop)' }
+      });
+      if (!res.ok) {
+        console.log(`[tikwm] HTTP ${res.status} attempt ${i + 1}/${attempts}`);
+        if (i < attempts - 1) await sleep(1500);
+        continue;
+      }
+      const data = await res.json();
+      if (data && data.code === 0 && data.data) {
+        const play = data.data.play || data.data.wmplay;
+        if (play) return play;
+      }
+      // Rate limited / video privee / autre
+      const msg = (data && data.msg) || 'unknown';
+      console.log(`[tikwm] code=${data && data.code} msg="${msg}" attempt ${i + 1}/${attempts}`);
+      if (data && data.code === -1 && i < attempts - 1) {
+        // rate limit -> wait more before retry
+        await sleep(2000);
+        continue;
+      }
+      return null;
+    } catch (e) {
+      console.log(`[tikwm] error attempt ${i + 1}/${attempts}: ${e.message}`);
+      if (i < attempts - 1) await sleep(1500);
+    }
   }
+  return null;
 }
 
 const INSTAGRAM_RE = /instagram\.com\/(reel|reels|p)\/([A-Za-z0-9_-]+)/i;
@@ -122,8 +142,9 @@ const TWITTER_RE = /(?:twitter\.com|x\.com)\/([^/\s?#]+)\/status\/(\d+)/i;
 
 // Appelle yt-dlp pour extraire l'URL directe d'une video/image.
 // Retourne null si yt-dlp pas installe, timeout, ou echec.
-function ytDlpGetUrl(originalUrl, timeoutMs = 20000) {
+function ytDlpGetUrl(originalUrl, timeoutMs = 35000) {
   return new Promise((resolve) => {
+    const t0 = Date.now();
     let proc;
     try {
       proc = spawn('yt-dlp', [
@@ -131,23 +152,45 @@ function ytDlpGetUrl(originalUrl, timeoutMs = 20000) {
         '-f', 'best[ext=mp4]/best',
         '--no-warnings',
         '--no-playlist',
-        '--socket-timeout', '10',
+        '--socket-timeout', '15',
         originalUrl
       ]);
-    } catch (_) {
+    } catch (e) {
+      console.log(`[yt-dlp] spawn error: ${e.message}`);
       return resolve(null);
     }
     let out = '';
+    let err = '';
     let killed = false;
-    const timer = setTimeout(() => { killed = true; try { proc.kill(); } catch (_) {}; resolve(null); }, timeoutMs);
+    const timer = setTimeout(() => {
+      killed = true;
+      console.log(`[yt-dlp] timeout after ${timeoutMs}ms for ${originalUrl}`);
+      try { proc.kill(); } catch (_) {}
+      resolve(null);
+    }, timeoutMs);
     proc.stdout.on('data', (d) => { out += d.toString(); });
-    proc.on('error', () => { clearTimeout(timer); if (!killed) resolve(null); });
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', (e) => {
+      clearTimeout(timer);
+      if (killed) return;
+      console.log(`[yt-dlp] proc error: ${e.message}`);
+      resolve(null);
+    });
     proc.on('close', (code) => {
       clearTimeout(timer);
       if (killed) return;
-      if (code !== 0) return resolve(null);
+      const ms = Date.now() - t0;
+      if (code !== 0) {
+        console.log(`[yt-dlp] exit ${code} (${ms}ms) for ${originalUrl} :: ${err.trim().split('\n').pop() || ''}`);
+        return resolve(null);
+      }
       const url = (out.trim().split('\n')[0] || '').trim();
-      resolve(url && url.startsWith('http') ? url : null);
+      if (!url || !url.startsWith('http')) {
+        console.log(`[yt-dlp] invalid url output (${ms}ms): ${out.slice(0, 200)}`);
+        return resolve(null);
+      }
+      console.log(`[yt-dlp] OK (${ms}ms) ${originalUrl}`);
+      resolve(url);
     });
   });
 }
