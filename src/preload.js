@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('memedrop', {
   backToWelcome: () => ipcRenderer.invoke('common:back-to-welcome'),
   quitApp: () => ipcRenderer.invoke('common:quit-app'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('common:set-auto-launch', enabled),
+  setOverlayPosition: (pos) => ipcRenderer.invoke('common:set-overlay-position', pos),
 
   // User panel
   getUserState: () => ipcRenderer.invoke('user:get-state'),

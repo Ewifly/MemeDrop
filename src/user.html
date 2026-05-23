@@ -145,6 +145,47 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Position grid */
+  .pos-screen {
+    background: #1a1b25;
+    border: 1px solid #32354a;
+    border-radius: 8px;
+    padding: 10px;
+    max-width: 220px;
+    margin: 0 auto;
+  }
+  .pos-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 6px;
+    aspect-ratio: 16 / 10;
+  }
+  .pos-btn {
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    border-radius: 5px;
+    cursor: pointer;
+    padding: 0;
+    transition: background 120ms, border-color 120ms, transform 100ms;
+    min-height: 22px;
+  }
+  .pos-btn:hover { background: #34374a; border-color: #5865F2; }
+  .pos-btn.active {
+    background: linear-gradient(135deg, #5865F2, #eb459e);
+    border-color: #5865F2;
+    transform: scale(1.08);
+  }
+  .pos-cell {
+    background: transparent;
+  }
+  .pos-label {
+    text-align: center;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #9aa0b4;
+  }
+
   /* Toggle */
   .toggle-row {
     display: flex;
@@ -239,6 +280,24 @@
   </div>
 
   <div class="section">
+    <h2>Position de l'overlay</h2>
+    <div class="pos-screen">
+      <div class="pos-grid" id="posGrid">
+        <button class="pos-btn" data-pos="top-left" title="Haut gauche"></button>
+        <div class="pos-cell"></div>
+        <button class="pos-btn" data-pos="top-right" title="Haut droite"></button>
+        <div class="pos-cell"></div>
+        <button class="pos-btn" data-pos="center" title="Centre"></button>
+        <div class="pos-cell"></div>
+        <button class="pos-btn" data-pos="bottom-left" title="Bas gauche"></button>
+        <div class="pos-cell"></div>
+        <button class="pos-btn" data-pos="bottom-right" title="Bas droite"></button>
+      </div>
+    </div>
+    <div class="pos-label" id="posLabel">Bas droite</div>
+  </div>
+
+  <div class="section">
     <div class="toggle-row">
       <div class="toggle-label">
         Recevoir les memes
@@ -267,7 +326,15 @@
   const $ = (id) => document.getElementById(id);
   function badge(text, cls) { return `<span class="badge ${cls}">${text}</span>`; }
 
-  let state = { volume: 80, muted: false, disabled: false, autoLaunch: false };
+  let state = { volume: 80, muted: false, disabled: false, autoLaunch: false, overlayPosition: 'bottom-right' };
+
+  const POS_LABELS = {
+    'top-left': 'Haut gauche',
+    'top-right': 'Haut droite',
+    'bottom-left': 'Bas gauche',
+    'bottom-right': 'Bas droite',
+    'center': 'Centre'
+  };
 
   function renderRoom(s) {
     $('roomCode').textContent = s.code || '-';
@@ -308,6 +375,14 @@
     else $('receiveSwitch').classList.add('on');
     if (state.autoLaunch) $('autoLaunchSwitch').classList.add('on');
     else $('autoLaunchSwitch').classList.remove('on');
+    renderPosition();
+  }
+
+  function renderPosition() {
+    document.querySelectorAll('.pos-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.pos === state.overlayPosition);
+    });
+    $('posLabel').textContent = POS_LABELS[state.overlayPosition] || state.overlayPosition;
   }
 
   async function load() {
@@ -316,6 +391,7 @@
     state.muted = !!s.muted;
     state.disabled = !!s.disabled;
     state.autoLaunch = !!s.autoLaunch;
+    state.overlayPosition = s.overlayPosition || 'bottom-right';
     renderRoom(s);
     renderAudio();
   }
@@ -354,8 +430,18 @@
     state.muted = !!s.muted;
     state.disabled = !!s.disabled;
     state.autoLaunch = !!s.autoLaunch;
+    state.overlayPosition = s.overlayPosition || state.overlayPosition;
     renderRoom(s);
     renderAudio();
+  });
+
+  document.querySelectorAll('.pos-btn').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const pos = b.dataset.pos;
+      state.overlayPosition = pos;
+      renderPosition();
+      await window.memedrop.setOverlayPosition(pos);
+    });
   });
 
   load();

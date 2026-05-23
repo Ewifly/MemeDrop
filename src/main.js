@@ -267,7 +267,8 @@ function notifyUserState() {
       volume: store.get('volume'),
       muted: store.get('muted'),
       disabled: store.get('disabled'),
-      autoLaunch: store.get('autoLaunch')
+      autoLaunch: store.get('autoLaunch'),
+      overlayPosition: store.get('overlayPosition')
     });
   }
 }
@@ -559,7 +560,8 @@ ipcMain.handle('user:get-state', () => ({
   volume: store.get('volume'),
   muted: store.get('muted'),
   disabled: store.get('disabled'),
-  autoLaunch: store.get('autoLaunch')
+  autoLaunch: store.get('autoLaunch'),
+  overlayPosition: store.get('overlayPosition')
 }));
 
 ipcMain.handle('common:set-auto-launch', (_e, enabled) => {
@@ -567,6 +569,16 @@ ipcMain.handle('common:set-auto-launch', (_e, enabled) => {
   ensureAutoLaunch();
   if (tray) tray.setContextMenu(buildTrayMenu());
   return !!enabled;
+});
+
+ipcMain.handle('common:set-overlay-position', (_e, pos) => {
+  const allowed = ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'center'];
+  if (!allowed.includes(pos)) return false;
+  store.set('overlayPosition', pos);
+  // Repositionne tout de suite l'overlay
+  positionOverlay(pos);
+  notifyUserState();
+  return true;
 });
 
 ipcMain.handle('common:quit-app', () => {

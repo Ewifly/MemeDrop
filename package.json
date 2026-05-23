@@ -1,6 +1,6 @@
 {
   "name": "memedrop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Drop des memes Discord en overlay sur les ecrans de tes amis",
   "main": "src/main.js",
   "author": "MemeDrop",
