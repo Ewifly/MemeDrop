@@ -38,8 +38,9 @@
     flex-direction: column;
     align-items: stretch;
     justify-content: center;
-    padding: 12px;
+    padding: 14px;
     box-sizing: border-box;
+    gap: 8px;
   }
 
   #media-inner {
@@ -58,7 +59,7 @@
     max-height: 100%;
     display: block;
     border-radius: 10px;
-    filter: drop-shadow(0 12px 28px rgba(0,0,0,0.55));
+    filter: drop-shadow(0 8px 20px rgba(0,0,0,0.55));
   }
 
   .yt-wrap {
@@ -114,30 +115,39 @@
   #stage.text-only #progress { display: none; }
 
   #text {
-    position: absolute;
-    left: 12px;
-    right: 12px;
-    bottom: 14px;
+    flex: 0 0 auto;
     text-align: center;
-    font-size: 22px;
+    font-size: 18px;
     font-weight: 700;
     line-height: 1.2;
     color: #fff;
-    -webkit-text-stroke: 4px #000;
+    -webkit-text-stroke: 3px #000;
     paint-order: stroke fill;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.7);
-    word-wrap: break-word;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+    word-break: break-word;
+    overflow-wrap: anywhere;
     pointer-events: none;
+    max-height: 84px;
+    overflow: hidden;
+    padding: 0 4px;
   }
   #text:empty { display: none; }
 
-  /* Quand y a pas de media, on centre juste le texte au milieu */
-  #stage.text-only #media-wrap { display: none; }
+  #progress {
+    flex: 0 0 auto;
+  }
+
+  /* Quand y a pas de media, on centre le texte au milieu et on cache progress */
+  #stage.text-only #media-inner,
+  #stage.text-only #progress { display: none; }
   #stage.text-only #text {
-    position: static;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-size: 32px;
-    padding: 0 20px;
-    -webkit-text-stroke: 5px #000;
+    max-height: none;
+    -webkit-text-stroke: 4px #000;
   }
 </style>
 </head>
@@ -146,8 +156,8 @@
     <div id="media-wrap">
       <div id="media-inner"></div>
       <div id="progress"><div id="progress-fill"></div></div>
+      <div id="text"></div>
     </div>
-    <div id="text"></div>
   </div>
 
 <script>
@@ -362,65 +372,31 @@
       currentMediaKind = 'youtube';
       const wrap = document.createElement('div');
       wrap.className = 'yt-wrap';
-      const playerHost = document.createElement('div');
-      const playerId = 'yt-player-' + Date.now();
-      playerHost.id = playerId;
-      wrap.appendChild(playerHost);
-      mediaInner.appendChild(wrap);
-
-      // Safety : si rien n'arrive en 10s, on debloque la queue
-      const safety = setTimeout(() => { showStage(); scheduleHide(capMs(cfgMs)); }, 10000);
-
-      whenYtApi(() => {
-        try {
-          const p = new YT.Player(playerId, {
-            host: 'https://www.youtube-nocookie.com',
-            videoId: mediaUrl,
-            playerVars: {
-              autoplay: 1,
-              controls: 0,
-              modestbranding: 1,
-              rel: 0,
-              fs: 0,
-              disablekb: 1,
-              playsinline: 1,
-              iv_load_policy: 3,
-              origin: 'https://www.youtube-nocookie.com'
-            },
-            events: {
-              onReady: (e) => {
-                clearTimeout(safety);
-                try {
-                  e.target.setVolume(currentVolume);
-                  if (currentMuted) e.target.mute(); else e.target.unMute();
-                  e.target.playVideo();
-                } catch (_) {}
-                const dur = (typeof e.target.getDuration === 'function') ? e.target.getDuration() * 1000 : 0;
-                const finalMs = capMs(Math.max(cfgMs, dur || cfgMs));
-                showStage();
-                scheduleHide(finalMs);
-              },
-              onError: () => {
-                clearTimeout(safety);
-                console.error('[overlay] YouTube player error for', mediaUrl);
-                showStage();
-                scheduleHide(capMs(cfgMs));
-              }
-            }
-          });
-          currentMediaEl = p;
-        } catch (e) {
-          clearTimeout(safety);
-          console.error('[overlay] new YT.Player failed:', e);
-          showStage();
-          scheduleHide(capMs(cfgMs));
-        }
-      }, () => {
-        clearTimeout(safety);
-        console.error('[overlay] YouTube API timeout, fallback');
-        showStage();
-        scheduleHide(capMs(cfgMs));
+      const iframe = document.createElement('iframe');
+      const params = new URLSearchParams({
+        autoplay: '1',
+        controls: '0',
+        modestbranding: '1',
+        rel: '0',
+        fs: '0',
+        disablekb: '1',
+        playsinline: '1',
+        iv_load_policy: '3',
+        mute: currentMuted ? '1' : '0'
       });
+      iframe.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(mediaUrl) + '?' + params.toString();
+      iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
+      iframe.setAttribute('allowfullscreen', '');
+      iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      iframe.onload = () => { showStage(); scheduleHide(capMs(cfgMs)); };
+      iframe.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
+      wrap.appendChild(iframe);
+      mediaInner.appendChild(wrap);
+      currentMediaEl = iframe;
+      // Safety net si onload jamais
+      setTimeout(() => {
+        if (!stage.classList.contains('show')) { showStage(); scheduleHide(capMs(cfgMs)); }
+      }, 5000);
       return;
     }
 
