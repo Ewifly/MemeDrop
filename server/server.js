@@ -194,8 +194,6 @@ async function resolveTwitterMedia(originalUrl) {
 }
 
 function pickMediaFromUrl(url) {
-  const ttId = extractTikTokId(url);
-  if (ttId) return { url: ttId, kind: 'tiktok' };
   const cleaned = url.split('?')[0].split('#')[0];
   if (MEDIA_RE.image.test(cleaned)) return { url, kind: 'image' };
   if (MEDIA_RE.video.test(cleaned)) return { url, kind: 'video' };
@@ -206,21 +204,24 @@ function pickMediaFromUrl(url) {
 function pickMediaFromEmbeds(embeds) {
   if (!embeds || !embeds.length) return null;
   for (const e of embeds) {
-    const ttId = extractTikTokId(e.url) || extractTikTokId(e.video?.url);
-    if (ttId) {
-      // Si Discord a un MP4 direct dans embed.video.url, prefer le (lecture HTML5)
-      const vidUrl = e.video?.url;
-      if (vidUrl) {
-        const c = vidUrl.split('?')[0];
-        if (MEDIA_RE.video.test(c)) return { url: vidUrl, kind: 'video' };
-      }
-      return { url: ttId, kind: 'tiktok' };
-    }
+    // Pour les embeds TikTok : on accepte UNIQUEMENT le MP4 direct dans
+    // embed.video.url. Pas de fallback iframe TikTok (cookie wall non cliquable).
+    // Si pas de MP4 direct, on prend la thumbnail comme image statique.
+    const isTikTokEmbed = extractTikTokId(e.url) || extractTikTokId(e.video?.url);
+
     const vidUrl = e.video?.url;
     if (vidUrl) {
       const c = vidUrl.split('?')[0];
       if (MEDIA_RE.video.test(c)) return { url: vidUrl, kind: 'video' };
     }
+
+    if (isTikTokEmbed) {
+      // TikTok embed sans MP4 direct -> fallback thumbnail statique
+      if (e.thumbnail?.url) return { url: e.thumbnail.url, kind: 'image' };
+      if (e.image?.url) return { url: e.image.url, kind: 'image' };
+      continue;
+    }
+
     if (e.image?.url) return { url: e.image.url, kind: 'image' };
     if (e.thumbnail?.url) return { url: e.thumbnail.url, kind: 'image' };
   }
