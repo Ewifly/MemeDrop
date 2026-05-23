@@ -288,6 +288,10 @@
       <button class="btn-secondary" id="btnTestBroadcast">Test broadcast</button>
     </div>
   </div>
+
+  <div class="section" style="background: transparent; border: none; padding: 0; margin-top: 4px;">
+    <button class="btn-danger" id="btnQuit" style="width: 100%; padding: 10px 14px; font-size: 13px;">Quitter MemeDrop</button>
+  </div>
 </div>
 
 <script>
@@ -376,6 +380,7 @@
   }
 
   $('btnBack').addEventListener('click', () => window.memedrop.backToWelcome());
+  $('btnQuit').addEventListener('click', () => window.memedrop.quitApp());
 
   $('btnSaveLocal').addEventListener('click', async () => {
     await window.memedrop.saveLocal({

@@ -23,6 +23,12 @@ contextBridge.exposeInMainWorld('memedrop', {
   // Common
   openLink: (url) => ipcRenderer.invoke('common:open-link', url),
   backToWelcome: () => ipcRenderer.invoke('common:back-to-welcome'),
+  quitApp: () => ipcRenderer.invoke('common:quit-app'),
+  setAutoLaunch: (enabled) => ipcRenderer.invoke('common:set-auto-launch', enabled),
+
+  // User panel
+  getUserState: () => ipcRenderer.invoke('user:get-state'),
+  onUserState: (cb) => ipcRenderer.on('user:state', (_e, data) => cb(data)),
 
   // Tray popup
   popupGetState: () => ipcRenderer.invoke('popup:get-state'),

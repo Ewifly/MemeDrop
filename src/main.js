@@ -26,10 +26,12 @@ const store = new Store({
     autoLaunch: true,
     volume: 80,        // 0-100
     muted: false,
-    disabled: false,
-    closeBehavior: 'ask' // 'ask' | 'quit' | 'minimize'
+    disabled: false
   }
 });
+
+// Etat live du salon courant (recu via WS 'hello')
+let currentRoomInfo = { room: null, roomName: null, serverStatus: null };
 
 function resolveIconPath() {
   const assetsDir = path.join(__dirname, '..', 'assets');
@@ -45,6 +47,7 @@ const iconPath = resolveIconPath();
 let tray = null;
 let welcomeWindow = null;
 let adminWindow = null;
+let userWindow = null;
 let overlayWindow = null;
 let trayPopupWindow = null;
 let ws = null;
@@ -205,6 +208,14 @@ function connectWs() {
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
+      if (msg.type === 'hello') {
+        currentRoomInfo = {
+          room: msg.room || null,
+          roomName: msg.roomName || null,
+          serverStatus: msg.status || null
+        };
+        notifyUserState();
+      }
       if (msg.type === 'meme') {
         showMeme({ mediaUrl: msg.mediaUrl, mediaKind: msg.mediaKind, text: msg.text });
       }
@@ -243,6 +254,22 @@ function notifyAdminStatus() {
   if (adminWindow && !adminWindow.isDestroyed()) {
     adminWindow.webContents.send('ws:status', { state: wsState });
   }
+  notifyUserState();
+}
+
+function notifyUserState() {
+  if (userWindow && !userWindow.isDestroyed()) {
+    userWindow.webContents.send('user:state', {
+      code: store.get('userCode'),
+      roomName: currentRoomInfo.roomName,
+      serverStatus: currentRoomInfo.serverStatus,
+      wsState,
+      volume: store.get('volume'),
+      muted: store.get('muted'),
+      disabled: store.get('disabled'),
+      autoLaunch: store.get('autoLaunch')
+    });
+  }
 }
 
 // --- Admin HTTP helpers ---
@@ -271,6 +298,7 @@ async function adminFetch(pathname, options = {}) {
 function createWelcomeWindow() {
   if (welcomeWindow && !welcomeWindow.isDestroyed()) {
     if (!welcomeWindow.isVisible()) welcomeWindow.show();
+    if (welcomeWindow.isMinimized()) welcomeWindow.restore();
     welcomeWindow.focus();
     return;
   }
@@ -292,9 +320,35 @@ function createWelcomeWindow() {
   welcomeWindow.on('closed', () => { welcomeWindow = null; });
 }
 
+function createUserWindow() {
+  if (userWindow && !userWindow.isDestroyed()) {
+    if (!userWindow.isVisible()) userWindow.show();
+    if (userWindow.isMinimized()) userWindow.restore();
+    userWindow.focus();
+    return;
+  }
+  userWindow = new BrowserWindow({
+    width: 460,
+    height: 540,
+    resizable: false,
+    title: 'MemeDrop',
+    icon: iconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  userWindow.setMenu(null);
+  userWindow.loadFile(path.join(__dirname, 'user.html'));
+  attachCloseBehavior(userWindow);
+  userWindow.on('closed', () => { userWindow = null; });
+}
+
 function createAdminWindow() {
   if (adminWindow && !adminWindow.isDestroyed()) {
     if (!adminWindow.isVisible()) adminWindow.show();
+    if (adminWindow.isMinimized()) adminWindow.restore();
     adminWindow.focus();
     return;
   }
@@ -317,41 +371,13 @@ function createAdminWindow() {
 }
 
 function attachCloseBehavior(win) {
+  // Clic sur la croix = minimiser dans la barre des taches. Pour quitter
+  // completement, utiliser le bouton "Quitter MemeDrop" dans la page,
+  // ou "Quitter" dans le menu tray (clic droit).
   win.on('close', (e) => {
     if (app.isQuiting) return;
-    const behavior = store.get('closeBehavior');
-    if (behavior === 'quit') {
-      app.isQuiting = true;
-      return; // laisse fermer, then before-quit fait le ménage
-    }
-    if (behavior === 'minimize') {
-      e.preventDefault();
-      win.hide();
-      return;
-    }
-    // 'ask' - dialog async pour avoir la checkbox state
     e.preventDefault();
-    dialog.showMessageBox(win, {
-      type: 'question',
-      buttons: ['Garder dans le tray', 'Quitter MemeDrop', 'Annuler'],
-      defaultId: 0,
-      cancelId: 2,
-      title: 'MemeDrop',
-      message: 'Que veux-tu faire ?',
-      detail: "Tu peux soit minimiser MemeDrop dans le tray (l'app continue d'ecouter), soit le quitter completement.",
-      checkboxLabel: 'Ne plus demander',
-      checkboxChecked: false
-    }).then((result) => {
-      if (result.response === 2) return; // annule
-      const chosen = result.response === 0 ? 'minimize' : 'quit';
-      if (result.checkboxChecked) store.set('closeBehavior', chosen);
-      if (chosen === 'minimize') {
-        win.hide();
-      } else {
-        app.isQuiting = true;
-        app.quit();
-      }
-    }).catch(() => {});
+    win.minimize();
   });
 }
 
@@ -455,29 +481,6 @@ function buildTrayMenu() {
       }
     },
     {
-      label: 'Comportement a la fermeture',
-      submenu: [
-        {
-          label: 'Demander a chaque fois',
-          type: 'radio',
-          checked: store.get('closeBehavior') === 'ask',
-          click: () => store.set('closeBehavior', 'ask')
-        },
-        {
-          label: 'Minimiser dans le tray',
-          type: 'radio',
-          checked: store.get('closeBehavior') === 'minimize',
-          click: () => store.set('closeBehavior', 'minimize')
-        },
-        {
-          label: 'Quitter completement',
-          type: 'radio',
-          checked: store.get('closeBehavior') === 'quit',
-          click: () => store.set('closeBehavior', 'quit')
-        }
-      ]
-    },
-    {
       label: 'Changer de mode',
       click: () => goBackToWelcome()
     },
@@ -490,6 +493,7 @@ function buildTrayMenu() {
 function openApp() {
   const mode = store.get('mode');
   if (mode === 'admin') createAdminWindow();
+  else if (mode === 'user') createUserWindow();
   else createWelcomeWindow();
   if (trayPopupWindow && trayPopupWindow.isVisible()) trayPopupWindow.hide();
 }
@@ -508,7 +512,9 @@ function notifyPopupState() {
 function goBackToWelcome() {
   store.set('mode', null);
   closeWs();
-  if (adminWindow) { adminWindow.close(); adminWindow = null; }
+  currentRoomInfo = { room: null, roomName: null, serverStatus: null };
+  if (adminWindow && !adminWindow.isDestroyed()) { adminWindow.destroy(); adminWindow = null; }
+  if (userWindow && !userWindow.isDestroyed()) { userWindow.destroy(); userWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
   createWelcomeWindow();
 }
@@ -528,8 +534,9 @@ ipcMain.handle('welcome:choose-user', (_e, code) => {
   if (!c) return false;
   store.set('mode', 'user');
   store.set('userCode', c);
-  if (welcomeWindow) { welcomeWindow.close(); welcomeWindow = null; }
+  if (welcomeWindow && !welcomeWindow.isDestroyed()) { welcomeWindow.destroy(); welcomeWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
+  createUserWindow();
   connectWs();
   return true;
 });
@@ -537,10 +544,34 @@ ipcMain.handle('welcome:choose-user', (_e, code) => {
 ipcMain.handle('welcome:choose-admin', (_e, pwd) => {
   if (pwd !== APP_ADMIN_PASSWORD) return false;
   store.set('mode', 'admin');
-  if (welcomeWindow) { welcomeWindow.close(); welcomeWindow = null; }
+  if (welcomeWindow && !welcomeWindow.isDestroyed()) { welcomeWindow.destroy(); welcomeWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
   createAdminWindow();
   connectWs();
+  return true;
+});
+
+ipcMain.handle('user:get-state', () => ({
+  code: store.get('userCode'),
+  roomName: currentRoomInfo.roomName,
+  serverStatus: currentRoomInfo.serverStatus,
+  wsState,
+  volume: store.get('volume'),
+  muted: store.get('muted'),
+  disabled: store.get('disabled'),
+  autoLaunch: store.get('autoLaunch')
+}));
+
+ipcMain.handle('common:set-auto-launch', (_e, enabled) => {
+  store.set('autoLaunch', !!enabled);
+  ensureAutoLaunch();
+  if (tray) tray.setContextMenu(buildTrayMenu());
+  return !!enabled;
+});
+
+ipcMain.handle('common:quit-app', () => {
+  app.isQuiting = true;
+  app.quit();
   return true;
 });
 
@@ -628,23 +659,30 @@ function notifyOverlayAudio() {
   }
 }
 
+function broadcastAudioState() {
+  notifyOverlayAudio();
+  notifyPopupState();
+  notifyUserState();
+}
+
 ipcMain.handle('popup:set-volume', (_e, v) => {
   const vol = Math.max(0, Math.min(100, Number(v) || 0));
   store.set('volume', vol);
-  notifyOverlayAudio();
+  broadcastAudioState();
   return vol;
 });
 
 ipcMain.handle('popup:set-muted', (_e, m) => {
   store.set('muted', !!m);
   if (tray) tray.setContextMenu(buildTrayMenu());
-  notifyOverlayAudio();
+  broadcastAudioState();
   return !!m;
 });
 
 ipcMain.handle('popup:set-disabled', (_e, d) => {
   store.set('disabled', !!d);
   if (tray) tray.setContextMenu(buildTrayMenu());
+  broadcastAudioState();
   return !!d;
 });
 
@@ -664,11 +702,7 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    const mode = store.get('mode');
-    if (mode === 'admin') createAdminWindow();
-    else if (!mode) createWelcomeWindow();
-  });
+  app.on('second-instance', () => openApp());
 
   app.whenReady().then(() => {
     if (process.platform === 'win32') app.setAppUserModelId('com.memedrop.app');
@@ -680,8 +714,9 @@ if (!gotLock) {
     if (!mode) {
       createWelcomeWindow();
     } else {
-      if (mode === 'admin' && !process.argv.includes('--hidden')) {
-        createAdminWindow();
+      if (!process.argv.includes('--hidden')) {
+        if (mode === 'admin') createAdminWindow();
+        else if (mode === 'user') createUserWindow();
       }
       connectWs();
     }

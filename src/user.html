@@ -1,0 +1,364 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>MemeDrop</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: #1e1f2b;
+    color: #e6e6f0;
+    font-family: 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+  }
+  .wrap { padding: 22px 26px; }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .back-btn {
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    color: #e6e6f0;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .back-btn:hover { background: #34374a; border-color: #5865F2; }
+  h1 {
+    margin: 0;
+    font-size: 22px;
+    background: linear-gradient(90deg, #5865F2, #eb459e);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .sub { color: #9aa0b4; font-size: 12px; margin-bottom: 18px; }
+
+  .section {
+    background: #25273a;
+    border: 1px solid #32354a;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .section h2 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #b9bccd;
+  }
+
+  .room-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .room-code {
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: #43d68f;
+    letter-spacing: 1px;
+  }
+  .room-name {
+    color: #e6e6f0;
+    font-size: 14px;
+  }
+  .room-name.empty { color: #7c8099; font-style: italic; }
+
+  .status-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12.5px;
+    margin-top: 6px;
+  }
+  .status-line .key { color: #9aa0b4; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .b-ok { background: #1f4d3a; color: #43d68f; }
+  .b-warn { background: #5a4a1a; color: #f5c85c; }
+  .b-err { background: #5a1f1f; color: #f06363; }
+  .b-idle { background: #34374a; color: #b9bccd; }
+
+  /* Volume slider */
+  .vol-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .vol-icon {
+    width: 28px;
+    text-align: center;
+    font-size: 18px;
+    color: #b9bccd;
+    cursor: pointer;
+    user-select: none;
+  }
+  .vol-icon:hover { color: #fff; }
+  .vol-icon.muted { color: #f06363; }
+  input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: linear-gradient(to right, #5865F2 0%, #5865F2 var(--p, 80%), #34374a var(--p, 80%), #34374a 100%);
+    border-radius: 3px;
+    outline: none;
+    margin: 0;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .vol-num {
+    width: 34px;
+    text-align: right;
+    font-size: 12px;
+    color: #b9bccd;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Toggle */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .toggle-label {
+    flex: 1;
+    font-size: 13px;
+  }
+  .toggle-label small {
+    display: block;
+    color: #7c8099;
+    font-size: 11px;
+    font-weight: normal;
+    margin-top: 2px;
+  }
+  .switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    background: #34374a;
+    border-radius: 11px;
+    cursor: pointer;
+    transition: background 150ms;
+    flex-shrink: 0;
+  }
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    background: #e6e6f0;
+    border-radius: 50%;
+    transition: transform 150ms;
+  }
+  .switch.on { background: #43d68f; }
+  .switch.on::after { transform: translateX(18px); }
+
+  /* Bouton quit */
+  .footer {
+    margin-top: 8px;
+  }
+  button.btn-quit {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #6e2a2a;
+    background: #4a1f1f;
+    color: #f06363;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button.btn-quit:hover { background: #5a2727; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <button class="back-btn" id="btnBack" title="Changer de mode">&#8592;</button>
+    <h1>MemeDrop</h1>
+  </div>
+  <div class="sub">Tu recois les memes de ton salon en temps reel.</div>
+
+  <div class="section">
+    <h2>Salon connecte</h2>
+    <div class="room-card">
+      <div class="room-code" id="roomCode">-</div>
+      <div class="room-name empty" id="roomName">Connexion...</div>
+      <div class="status-line">
+        <span class="key">Connexion</span>
+        <span id="wsBadge"><span class="badge b-idle">...</span></span>
+      </div>
+      <div class="status-line">
+        <span class="key">Bot Discord</span>
+        <span id="botBadge"><span class="badge b-idle">...</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Volume</h2>
+    <div class="vol-row">
+      <div class="vol-icon" id="volIcon">🔊</div>
+      <input type="range" id="volSlider" min="0" max="100" step="1" value="80" />
+      <div class="vol-num" id="volNum">80</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="toggle-row">
+      <div class="toggle-label">
+        Recevoir les memes
+        <small>Coupe l'overlay sans deconnecter du salon</small>
+      </div>
+      <div class="switch on" id="receiveSwitch"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="toggle-row">
+      <div class="toggle-label">
+        Lancer au demarrage de Windows
+        <small>MemeDrop se lance automatiquement avec ton PC</small>
+      </div>
+      <div class="switch" id="autoLaunchSwitch"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="btn-quit" id="btnQuit">Quitter MemeDrop</button>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  function badge(text, cls) { return `<span class="badge ${cls}">${text}</span>`; }
+
+  let state = { volume: 80, muted: false, disabled: false, autoLaunch: false };
+
+  function renderRoom(s) {
+    $('roomCode').textContent = s.code || '-';
+    if (s.roomName) {
+      $('roomName').textContent = s.roomName;
+      $('roomName').classList.remove('empty');
+    } else {
+      $('roomName').textContent = 'Aucun nom';
+      $('roomName').classList.add('empty');
+    }
+    // WS state
+    const wsMap = {
+      connected: { t: 'Connecte', c: 'b-ok' },
+      connecting: { t: 'Connexion...', c: 'b-warn' },
+      disconnected: { t: 'Deconnecte', c: 'b-err' },
+      error: { t: 'Erreur', c: 'b-err' },
+      no_url: { t: 'Pas configure', c: 'b-err' },
+      idle: { t: 'Idle', c: 'b-idle' }
+    };
+    const w = wsMap[s.wsState] || wsMap.idle;
+    $('wsBadge').innerHTML = badge(w.t, w.c);
+    // Bot Discord state (cote serveur)
+    const ss = s.serverStatus || 'inconnu';
+    let bCls = 'b-warn';
+    if (ss === 'connected') bCls = 'b-ok';
+    if (typeof ss === 'string' && (ss.startsWith('error') || ss.startsWith('login_failed'))) bCls = 'b-err';
+    if (ss === 'stopped' || ss === 'unconfigured') bCls = 'b-idle';
+    $('botBadge').innerHTML = badge(ss, bCls);
+  }
+
+  function renderAudio() {
+    $('volSlider').value = state.volume;
+    $('volNum').textContent = state.muted ? 'Mute' : String(state.volume);
+    $('volSlider').style.setProperty('--p', state.muted ? '0%' : state.volume + '%');
+    $('volIcon').textContent = state.muted ? '🔇' : (state.volume === 0 ? '🔈' : state.volume < 50 ? '🔉' : '🔊');
+    $('volIcon').classList.toggle('muted', state.muted);
+    if (state.disabled) $('receiveSwitch').classList.remove('on');
+    else $('receiveSwitch').classList.add('on');
+    if (state.autoLaunch) $('autoLaunchSwitch').classList.add('on');
+    else $('autoLaunchSwitch').classList.remove('on');
+  }
+
+  async function load() {
+    const s = await window.memedrop.getUserState();
+    state.volume = s.volume ?? 80;
+    state.muted = !!s.muted;
+    state.disabled = !!s.disabled;
+    state.autoLaunch = !!s.autoLaunch;
+    renderRoom(s);
+    renderAudio();
+  }
+
+  $('volSlider').addEventListener('input', async () => {
+    state.volume = Number($('volSlider').value);
+    if (state.muted && state.volume > 0) state.muted = false;
+    renderAudio();
+    await window.memedrop.popupSetVolume(state.volume);
+    if (!state.muted) await window.memedrop.popupSetMuted(false);
+  });
+
+  $('volIcon').addEventListener('click', async () => {
+    state.muted = !state.muted;
+    renderAudio();
+    await window.memedrop.popupSetMuted(state.muted);
+  });
+
+  $('receiveSwitch').addEventListener('click', async () => {
+    state.disabled = !state.disabled;
+    renderAudio();
+    await window.memedrop.popupSetDisabled(state.disabled);
+  });
+
+  $('autoLaunchSwitch').addEventListener('click', async () => {
+    state.autoLaunch = !state.autoLaunch;
+    renderAudio();
+    await window.memedrop.setAutoLaunch(state.autoLaunch);
+  });
+
+  $('btnBack').addEventListener('click', () => window.memedrop.backToWelcome());
+  $('btnQuit').addEventListener('click', () => window.memedrop.quitApp());
+
+  window.memedrop.onUserState((s) => {
+    state.volume = s.volume ?? state.volume;
+    state.muted = !!s.muted;
+    state.disabled = !!s.disabled;
+    state.autoLaunch = !!s.autoLaunch;
+    renderRoom(s);
+    renderAudio();
+  });
+
+  load();
+</script>
+</body>
+</html>
