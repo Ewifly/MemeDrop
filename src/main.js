@@ -24,8 +24,10 @@ const store = new Store({
     serverUrl: DEFAULT_SERVER_URL,
     serverAdminPassword: '',
     userCode: '',
+    userCodes: [],     // multi-salon : liste des codes (priorite sur userCode legacy)
     overlayDurationMs: 8000,
     overlayPosition: 'bottom-right',
+    overlayOpacity: 100, // 0-100, 100 = opaque
     autoLaunch: true,
     volume: 80,        // 0-100
     muted: false,
@@ -33,8 +35,20 @@ const store = new Store({
   }
 });
 
-// Etat live du salon courant (recu via WS 'hello')
-let currentRoomInfo = { room: null, roomName: null, serverStatus: null };
+// Migration : userCode (legacy) -> userCodes (array)
+(function migrateUserCodes() {
+  const codes = store.get('userCodes');
+  if (Array.isArray(codes) && codes.length > 0) return;
+  const legacy = store.get('userCode');
+  if (legacy && typeof legacy === 'string') {
+    store.set('userCodes', [legacy.trim()]);
+  }
+})();
+
+// Statut du bot Discord (partage entre toutes les rooms)
+let serverBotStatus = null;
+// roomName par code (recu via WS hello)
+let roomNameByCode = {};
 
 function resolveIconPath() {
   const assetsDir = path.join(__dirname, '..', 'assets');
@@ -53,9 +67,14 @@ let adminWindow = null;
 let userWindow = null;
 let overlayWindow = null;
 let trayPopupWindow = null;
-let ws = null;
-let wsReconnectTimer = null;
-let wsState = 'idle';
+
+// WS state : multi-connexion (un WS par code de salon en mode user)
+let wsByCode = {};            // code -> WebSocket
+let wsStateByCode = {};       // code -> 'connecting' | 'connected' | 'disconnected' | 'error'
+let wsReconnectByCode = {};   // code -> setTimeout id
+let wsAdmin = null;           // une seule WS pour le mode admin
+let wsAdminState = 'idle';
+let wsAdminReconnectTimer = null;
 
 // --- helpers ---
 
@@ -118,6 +137,8 @@ function createOverlayWindow() {
   overlayWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  // Applique l'opacite configuree (100 = totalement opaque)
+  try { overlayWindow.setOpacity(Math.max(0, Math.min(100, Number(store.get('overlayOpacity')) || 100)) / 100); } catch (_) {}
 
   // YouTube et TikTok envoient X-Frame-Options et CSP qui bloquent
   // l'embed iframe dans Chromium. On strip ces headers pour ces domaines.
@@ -212,124 +233,199 @@ function showMeme({ mediaUrl, mediaKind, text, author, customDuration, forceDura
   }
 }
 
-// --- WebSocket client ---
+// --- WebSocket client (multi-connexion mode user, simple mode admin) ---
 
-function buildWsUrl() {
+function feedBaseUrl() {
   const base = store.get('serverUrl');
   if (!base) return null;
-  const mode = store.get('mode');
-  const u = base.replace(/\/+$/, '') + '/feed';
-  if (mode === 'user') {
-    const code = store.get('userCode');
-    if (!code) return null;
-    return `${u}?code=${encodeURIComponent(code)}`;
-  }
-  if (mode === 'admin') {
-    const adminPwd = store.get('serverAdminPassword');
-    if (!adminPwd) return null;
-    return `${u}?admin=${encodeURIComponent(adminPwd)}`;
-  }
-  return null;
+  return base.replace(/\/+$/, '') + '/feed';
 }
 
-function connectWs() {
-  closeWs();
-
-  const wsUrl = buildWsUrl();
-  if (!wsUrl) {
-    wsState = 'no_url';
+function handleWsMessage(msg) {
+  if (msg.type === 'hello') {
+    serverBotStatus = msg.status || serverBotStatus;
+    if (msg.room) roomNameByCode[msg.room] = msg.roomName || null;
+    notifyUserState();
     notifyAdminStatus();
+  }
+  if (msg.type === 'meme') {
+    showMeme({
+      mediaUrl: msg.mediaUrl,
+      mediaKind: msg.mediaKind,
+      text: msg.text,
+      author: msg.author,
+      customDuration: msg.duration || null,
+      forceDuration: !!msg.forceDuration
+    });
+  }
+}
+
+// Connecte une WS user pour un code de salon
+function connectUserWs(code) {
+  if (!code) return;
+  closeUserWs(code);
+  const base = feedBaseUrl();
+  if (!base) { wsStateByCode[code] = 'no_url'; notifyUserState(); return; }
+
+  const wsUrl = base + '?code=' + encodeURIComponent(code);
+  wsStateByCode[code] = 'connecting';
+  notifyUserState();
+
+  let ws;
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (_) {
+    wsStateByCode[code] = 'error';
+    notifyUserState();
+    scheduleUserReconnect(code);
     return;
   }
+  wsByCode[code] = ws;
 
-  wsState = 'connecting';
+  ws.on('open', () => { wsStateByCode[code] = 'connected'; notifyUserState(); });
+  ws.on('message', (data) => {
+    try { handleWsMessage(JSON.parse(data.toString())); } catch (_) {}
+  });
+  ws.on('close', () => {
+    wsStateByCode[code] = 'disconnected';
+    notifyUserState();
+    scheduleUserReconnect(code);
+  });
+  ws.on('error', () => {
+    wsStateByCode[code] = 'error';
+    notifyUserState();
+  });
+}
+
+function closeUserWs(code) {
+  if (wsReconnectByCode[code]) { clearTimeout(wsReconnectByCode[code]); delete wsReconnectByCode[code]; }
+  const ws = wsByCode[code];
+  if (ws) {
+    try { ws.removeAllListeners(); ws.close(); } catch (_) {}
+    delete wsByCode[code];
+  }
+}
+
+function scheduleUserReconnect(code) {
+  if (wsReconnectByCode[code]) return;
+  // Si le code n'est plus dans la liste, on reconnecte pas
+  const current = (store.get('userCodes') || []).map(String);
+  if (!current.includes(code)) return;
+  wsReconnectByCode[code] = setTimeout(() => {
+    delete wsReconnectByCode[code];
+    connectUserWs(code);
+  }, 5000);
+}
+
+function connectAdminWs() {
+  closeAdminWs();
+  const base = feedBaseUrl();
+  const pwd = store.get('serverAdminPassword');
+  if (!base || !pwd) { wsAdminState = 'no_url'; notifyAdminStatus(); return; }
+  wsAdminState = 'connecting';
   notifyAdminStatus();
 
   try {
-    ws = new WebSocket(wsUrl);
-  } catch (e) {
-    wsState = 'error';
+    wsAdmin = new WebSocket(base + '?admin=' + encodeURIComponent(pwd));
+  } catch (_) {
+    wsAdminState = 'error';
     notifyAdminStatus();
-    scheduleWsReconnect();
+    scheduleAdminReconnect();
     return;
   }
-
-  ws.on('open', () => {
-    wsState = 'connected';
+  wsAdmin.on('open', () => { wsAdminState = 'connected'; notifyAdminStatus(); });
+  wsAdmin.on('message', (data) => {
+    try { handleWsMessage(JSON.parse(data.toString())); } catch (_) {}
+  });
+  wsAdmin.on('close', () => {
+    wsAdminState = 'disconnected';
     notifyAdminStatus();
+    scheduleAdminReconnect();
   });
-
-  ws.on('message', (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      if (msg.type === 'hello') {
-        currentRoomInfo = {
-          room: msg.room || null,
-          roomName: msg.roomName || null,
-          serverStatus: msg.status || null
-        };
-        notifyUserState();
-      }
-      if (msg.type === 'meme') {
-        showMeme({
-          mediaUrl: msg.mediaUrl,
-          mediaKind: msg.mediaKind,
-          text: msg.text,
-          author: msg.author,
-          customDuration: msg.duration || null,
-          forceDuration: !!msg.forceDuration
-        });
-      }
-    } catch (_) {}
-  });
-
-  ws.on('close', () => {
-    wsState = 'disconnected';
-    notifyAdminStatus();
-    scheduleWsReconnect();
-  });
-
-  ws.on('error', () => {
-    wsState = 'error';
-    notifyAdminStatus();
-  });
+  wsAdmin.on('error', () => { wsAdminState = 'error'; notifyAdminStatus(); });
 }
 
-function closeWs() {
-  if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
-  if (ws) {
-    try { ws.removeAllListeners(); ws.close(); } catch (_) {}
-    ws = null;
+function closeAdminWs() {
+  if (wsAdminReconnectTimer) { clearTimeout(wsAdminReconnectTimer); wsAdminReconnectTimer = null; }
+  if (wsAdmin) {
+    try { wsAdmin.removeAllListeners(); wsAdmin.close(); } catch (_) {}
+    wsAdmin = null;
   }
 }
 
-function scheduleWsReconnect() {
-  if (wsReconnectTimer) return;
-  wsReconnectTimer = setTimeout(() => {
-    wsReconnectTimer = null;
-    connectWs();
+function scheduleAdminReconnect() {
+  if (wsAdminReconnectTimer) return;
+  wsAdminReconnectTimer = setTimeout(() => {
+    wsAdminReconnectTimer = null;
+    if (store.get('mode') === 'admin') connectAdminWs();
   }, 5000);
+}
+
+// Point d'entree : connecte tout selon le mode
+function connectAllWs() {
+  closeAllWs();
+  const mode = store.get('mode');
+  if (mode === 'admin') {
+    connectAdminWs();
+  } else if (mode === 'user') {
+    const codes = (store.get('userCodes') || []).filter(Boolean);
+    for (const code of codes) connectUserWs(code);
+  }
+}
+
+function closeAllWs() {
+  closeAdminWs();
+  for (const code of Object.keys(wsByCode)) closeUserWs(code);
+  for (const code of Object.keys(wsReconnectByCode)) {
+    clearTimeout(wsReconnectByCode[code]);
+    delete wsReconnectByCode[code];
+  }
+  wsByCode = {};
+  wsStateByCode = {};
+}
+
+function aggregateUserWsState() {
+  const codes = (store.get('userCodes') || []).filter(Boolean);
+  if (codes.length === 0) return 'no_url';
+  let anyConnected = false;
+  let allError = true;
+  for (const code of codes) {
+    const s = wsStateByCode[code];
+    if (s === 'connected') { anyConnected = true; allError = false; }
+    else if (s !== 'error' && s !== 'no_url' && s) allError = false;
+  }
+  if (anyConnected) return 'connected';
+  if (allError) return 'error';
+  return 'connecting';
 }
 
 function notifyAdminStatus() {
   if (adminWindow && !adminWindow.isDestroyed()) {
-    adminWindow.webContents.send('ws:status', { state: wsState });
+    adminWindow.webContents.send('ws:status', { state: wsAdminState });
   }
-  notifyUserState();
+}
+
+function buildRoomsState() {
+  const codes = (store.get('userCodes') || []).filter(Boolean);
+  return codes.map((code) => ({
+    code,
+    roomName: roomNameByCode[code] || null,
+    wsState: wsStateByCode[code] || 'idle'
+  }));
 }
 
 function notifyUserState() {
   if (userWindow && !userWindow.isDestroyed()) {
     userWindow.webContents.send('user:state', {
-      code: store.get('userCode'),
-      roomName: currentRoomInfo.roomName,
-      serverStatus: currentRoomInfo.serverStatus,
-      wsState,
+      rooms: buildRoomsState(),
+      serverStatus: serverBotStatus,
+      wsState: aggregateUserWsState(),
       volume: store.get('volume'),
       muted: store.get('muted'),
       disabled: store.get('disabled'),
       autoLaunch: store.get('autoLaunch'),
-      overlayPosition: store.get('overlayPosition')
+      overlayPosition: store.get('overlayPosition'),
+      overlayOpacity: store.get('overlayOpacity')
     });
   }
 }
@@ -524,14 +620,19 @@ function buildTrayMenu() {
   ];
 
   if (mode === 'user') {
+    const codes = (store.get('userCodes') || []).filter(Boolean);
     items.push({
-      label: `Code salon: ${store.get('userCode') || '-'}`,
+      label: codes.length === 0
+        ? 'Aucun salon'
+        : codes.length === 1
+        ? `Salon: ${codes[0]}`
+        : `Salons: ${codes.join(', ')}`,
       enabled: false
     });
   }
 
   items.push(
-    { label: 'Reconnecter au serveur', click: () => connectWs() },
+    { label: 'Reconnecter au serveur', click: () => connectAllWs() },
     { type: 'separator' },
     {
       label: 'Lancer au demarrage',
@@ -573,8 +674,9 @@ function notifyPopupState() {
 
 function goBackToWelcome() {
   store.set('mode', null);
-  closeWs();
-  currentRoomInfo = { room: null, roomName: null, serverStatus: null };
+  closeAllWs();
+  serverBotStatus = null;
+  roomNameByCode = {};
   if (adminWindow && !adminWindow.isDestroyed()) { adminWindow.destroy(); adminWindow = null; }
   if (userWindow && !userWindow.isDestroyed()) { userWindow.destroy(); userWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
@@ -595,11 +697,12 @@ ipcMain.handle('welcome:choose-user', (_e, code) => {
   const c = String(code || '').trim();
   if (!c) return false;
   store.set('mode', 'user');
-  store.set('userCode', c);
+  store.set('userCode', c); // legacy compat
+  store.set('userCodes', [c]);
   if (welcomeWindow && !welcomeWindow.isDestroyed()) { welcomeWindow.destroy(); welcomeWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
   createUserWindow();
-  connectWs();
+  connectAllWs();
   return true;
 });
 
@@ -609,21 +712,44 @@ ipcMain.handle('welcome:choose-admin', (_e, pwd) => {
   if (welcomeWindow && !welcomeWindow.isDestroyed()) { welcomeWindow.destroy(); welcomeWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
   createAdminWindow();
-  connectWs();
+  connectAllWs();
   return true;
 });
 
 ipcMain.handle('user:get-state', () => ({
-  code: store.get('userCode'),
-  roomName: currentRoomInfo.roomName,
-  serverStatus: currentRoomInfo.serverStatus,
-  wsState,
+  rooms: buildRoomsState(),
+  serverStatus: serverBotStatus,
+  wsState: aggregateUserWsState(),
   volume: store.get('volume'),
   muted: store.get('muted'),
   disabled: store.get('disabled'),
   autoLaunch: store.get('autoLaunch'),
-  overlayPosition: store.get('overlayPosition')
+  overlayPosition: store.get('overlayPosition'),
+  overlayOpacity: store.get('overlayOpacity')
 }));
+
+ipcMain.handle('user:add-code', (_e, code) => {
+  const c = String(code || '').trim();
+  if (!c) return { ok: false, error: 'empty' };
+  const codes = (store.get('userCodes') || []).map(String);
+  if (codes.includes(c)) return { ok: false, error: 'duplicate' };
+  codes.push(c);
+  store.set('userCodes', codes);
+  connectUserWs(c);
+  notifyUserState();
+  return { ok: true };
+});
+
+ipcMain.handle('user:remove-code', (_e, code) => {
+  const c = String(code || '').trim();
+  if (!c) return { ok: false };
+  const codes = (store.get('userCodes') || []).map(String).filter((x) => x !== c);
+  store.set('userCodes', codes);
+  closeUserWs(c);
+  delete roomNameByCode[c];
+  notifyUserState();
+  return { ok: true };
+});
 
 ipcMain.handle('common:set-auto-launch', (_e, enabled) => {
   store.set('autoLaunch', !!enabled);
@@ -640,6 +766,16 @@ ipcMain.handle('common:set-overlay-position', (_e, pos) => {
   positionOverlay(pos);
   notifyUserState();
   return true;
+});
+
+ipcMain.handle('common:set-overlay-opacity', (_e, opacity) => {
+  const o = Math.max(0, Math.min(100, Number(opacity) || 0));
+  store.set('overlayOpacity', o);
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    try { overlayWindow.setOpacity(o / 100); } catch (_) {}
+  }
+  notifyUserState();
+  return o;
 });
 
 ipcMain.handle('common:quit-app', () => {
@@ -665,7 +801,7 @@ ipcMain.handle('admin:save-local', (_e, data) => {
   if (typeof data.autoLaunch === 'boolean') store.set('autoLaunch', data.autoLaunch);
   ensureAutoLaunch();
   if (tray) tray.setContextMenu(buildTrayMenu());
-  connectWs();
+  connectAllWs();
   return true;
 });
 
@@ -791,10 +927,10 @@ if (!gotLock) {
         if (mode === 'admin') createAdminWindow();
         else if (mode === 'user') createUserWindow();
       }
-      connectWs();
+      connectAllWs();
     }
   });
 
   app.on('window-all-closed', (e) => { e.preventDefault(); });
-  app.on('before-quit', () => { closeWs(); });
+  app.on('before-quit', () => { closeAllWs(); });
 }

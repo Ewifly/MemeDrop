@@ -26,10 +26,13 @@ contextBridge.exposeInMainWorld('memedrop', {
   quitApp: () => ipcRenderer.invoke('common:quit-app'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('common:set-auto-launch', enabled),
   setOverlayPosition: (pos) => ipcRenderer.invoke('common:set-overlay-position', pos),
+  setOverlayOpacity: (opacity) => ipcRenderer.invoke('common:set-overlay-opacity', opacity),
 
   // User panel
   getUserState: () => ipcRenderer.invoke('user:get-state'),
   onUserState: (cb) => ipcRenderer.on('user:state', (_e, data) => cb(data)),
+  addUserCode: (code) => ipcRenderer.invoke('user:add-code', code),
+  removeUserCode: (code) => ipcRenderer.invoke('user:remove-code', code),
 
   // Tray popup
   popupGetState: () => ipcRenderer.invoke('popup:get-state'),

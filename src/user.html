@@ -228,6 +228,76 @@
   .switch.on { background: #43d68f; }
   .switch.on::after { transform: translateX(18px); }
 
+  /* Liste de salons */
+  .rooms-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .room-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    border-radius: 7px;
+  }
+  .room-item .left { flex: 1; min-width: 0; }
+  .room-item .code {
+    font-family: 'Cascadia Code', Consolas, monospace;
+    color: #43d68f;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .room-item .name {
+    color: #b9bccd;
+    font-size: 11.5px;
+    margin-top: 2px;
+  }
+  .room-item .name.empty { color: #7c8099; font-style: italic; }
+  .room-item .badge-wrap { flex-shrink: 0; }
+  .room-item .remove-btn {
+    background: #3a2020;
+    border: 1px solid #5a2727;
+    color: #f06363;
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .room-item .remove-btn:hover { background: #4a2727; }
+
+  .add-room-row { display: flex; gap: 8px; }
+  .add-room-row input {
+    flex: 1;
+    padding: 8px 10px;
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+  }
+  .add-room-row input:focus { border-color: #5865F2; }
+  .add-room-row button {
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: none;
+    background: #5865F2;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .add-room-row button:hover { background: #4752c4; }
+  .add-room-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .rooms-empty {
+    text-align: center;
+    color: #7c8099;
+    font-size: 12px;
+    padding: 10px 0;
+    font-style: italic;
+  }
+
   /* Bouton quit */
   .footer {
     margin-top: 8px;
@@ -255,18 +325,16 @@
   <div class="sub">Tu recois les memes de ton salon en temps reel.</div>
 
   <div class="section">
-    <h2>Salon connecte</h2>
-    <div class="room-card">
-      <div class="room-code" id="roomCode">-</div>
-      <div class="room-name empty" id="roomName">Connexion...</div>
-      <div class="status-line">
-        <span class="key">Connexion</span>
-        <span id="wsBadge"><span class="badge b-idle">...</span></span>
-      </div>
-      <div class="status-line">
-        <span class="key">Bot Discord</span>
-        <span id="botBadge"><span class="badge b-idle">...</span></span>
-      </div>
+    <h2>Salons connectes</h2>
+    <div class="rooms-list" id="roomsList"></div>
+    <div class="rooms-empty" id="roomsEmpty">Aucun salon. Ajoute-en un ci-dessous.</div>
+    <div class="add-room-row">
+      <input type="text" id="newCodeInput" placeholder="Code d'un autre salon" autocomplete="off" />
+      <button id="btnAddCode">Ajouter</button>
+    </div>
+    <div class="status-line" style="margin-top: 12px;">
+      <span class="key">Bot Discord</span>
+      <span id="botBadge"><span class="badge b-idle">...</span></span>
     </div>
   </div>
 
@@ -298,6 +366,15 @@
   </div>
 
   <div class="section">
+    <h2>Opacite de l'overlay</h2>
+    <div class="vol-row">
+      <div class="vol-icon">👁</div>
+      <input type="range" id="opacitySlider" min="0" max="100" step="1" value="100" />
+      <div class="vol-num" id="opacityNum">100</div>
+    </div>
+  </div>
+
+  <div class="section">
     <div class="toggle-row">
       <div class="toggle-label">
         Recevoir les memes
@@ -326,7 +403,16 @@
   const $ = (id) => document.getElementById(id);
   function badge(text, cls) { return `<span class="badge ${cls}">${text}</span>`; }
 
-  let state = { volume: 80, muted: false, disabled: false, autoLaunch: false, overlayPosition: 'bottom-right' };
+  let state = {
+    volume: 80,
+    muted: false,
+    disabled: false,
+    autoLaunch: false,
+    overlayPosition: 'bottom-right',
+    overlayOpacity: 100,
+    rooms: [],
+    serverStatus: null
+  };
 
   const POS_LABELS = {
     'top-left': 'Haut gauche',
@@ -336,28 +422,50 @@
     'center': 'Centre'
   };
 
-  function renderRoom(s) {
-    $('roomCode').textContent = s.code || '-';
-    if (s.roomName) {
-      $('roomName').textContent = s.roomName;
-      $('roomName').classList.remove('empty');
+  const WS_MAP = {
+    connected: { t: 'Connecte', c: 'b-ok' },
+    connecting: { t: 'Connexion...', c: 'b-warn' },
+    disconnected: { t: 'Deconnecte', c: 'b-err' },
+    error: { t: 'Erreur', c: 'b-err' },
+    no_url: { t: 'Pas config', c: 'b-err' },
+    idle: { t: 'Idle', c: 'b-idle' }
+  };
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function renderRooms() {
+    const list = $('roomsList');
+    const empty = $('roomsEmpty');
+    list.innerHTML = '';
+    if (!state.rooms || state.rooms.length === 0) {
+      empty.style.display = 'block';
     } else {
-      $('roomName').textContent = 'Aucun nom';
-      $('roomName').classList.add('empty');
+      empty.style.display = 'none';
+      for (const r of state.rooms) {
+        const w = WS_MAP[r.wsState] || WS_MAP.idle;
+        const item = document.createElement('div');
+        item.className = 'room-item';
+        item.innerHTML = `
+          <div class="left">
+            <div class="code">${escapeHtml(r.code)}</div>
+            <div class="name ${r.roomName ? '' : 'empty'}">${escapeHtml(r.roomName || 'Sans nom')}</div>
+          </div>
+          <div class="badge-wrap">${badge(w.t, w.c)}</div>
+          <button class="remove-btn" data-code="${escapeHtml(r.code)}">Retirer</button>
+        `;
+        list.appendChild(item);
+      }
+      list.querySelectorAll('.remove-btn').forEach((b) => {
+        b.addEventListener('click', async () => {
+          if (!confirm(`Retirer le salon "${b.dataset.code}" ?`)) return;
+          await window.memedrop.removeUserCode(b.dataset.code);
+        });
+      });
     }
-    // WS state
-    const wsMap = {
-      connected: { t: 'Connecte', c: 'b-ok' },
-      connecting: { t: 'Connexion...', c: 'b-warn' },
-      disconnected: { t: 'Deconnecte', c: 'b-err' },
-      error: { t: 'Erreur', c: 'b-err' },
-      no_url: { t: 'Pas configure', c: 'b-err' },
-      idle: { t: 'Idle', c: 'b-idle' }
-    };
-    const w = wsMap[s.wsState] || wsMap.idle;
-    $('wsBadge').innerHTML = badge(w.t, w.c);
-    // Bot Discord state (cote serveur)
-    const ss = s.serverStatus || 'inconnu';
+    // Bot Discord state
+    const ss = state.serverStatus || 'inconnu';
     let bCls = 'b-warn';
     if (ss === 'connected') bCls = 'b-ok';
     if (typeof ss === 'string' && (ss.startsWith('error') || ss.startsWith('login_failed'))) bCls = 'b-err';
@@ -376,6 +484,7 @@
     if (state.autoLaunch) $('autoLaunchSwitch').classList.add('on');
     else $('autoLaunchSwitch').classList.remove('on');
     renderPosition();
+    renderOpacity();
   }
 
   function renderPosition() {
@@ -385,14 +494,27 @@
     $('posLabel').textContent = POS_LABELS[state.overlayPosition] || state.overlayPosition;
   }
 
-  async function load() {
-    const s = await window.memedrop.getUserState();
-    state.volume = s.volume ?? 80;
+  function renderOpacity() {
+    $('opacitySlider').value = state.overlayOpacity;
+    $('opacityNum').textContent = String(state.overlayOpacity);
+    $('opacitySlider').style.setProperty('--p', state.overlayOpacity + '%');
+  }
+
+  function applyState(s) {
+    state.volume = s.volume ?? state.volume;
     state.muted = !!s.muted;
     state.disabled = !!s.disabled;
     state.autoLaunch = !!s.autoLaunch;
-    state.overlayPosition = s.overlayPosition || 'bottom-right';
-    renderRoom(s);
+    state.overlayPosition = s.overlayPosition || state.overlayPosition;
+    state.overlayOpacity = (s.overlayOpacity ?? state.overlayOpacity);
+    state.rooms = s.rooms || [];
+    state.serverStatus = s.serverStatus ?? state.serverStatus;
+  }
+
+  async function load() {
+    const s = await window.memedrop.getUserState();
+    applyState(s);
+    renderRooms();
     renderAudio();
   }
 
@@ -410,6 +532,12 @@
     await window.memedrop.popupSetMuted(state.muted);
   });
 
+  $('opacitySlider').addEventListener('input', async () => {
+    state.overlayOpacity = Number($('opacitySlider').value);
+    renderOpacity();
+    await window.memedrop.setOverlayOpacity(state.overlayOpacity);
+  });
+
   $('receiveSwitch').addEventListener('click', async () => {
     state.disabled = !state.disabled;
     renderAudio();
@@ -422,16 +550,29 @@
     await window.memedrop.setAutoLaunch(state.autoLaunch);
   });
 
+  async function addCode() {
+    const code = $('newCodeInput').value.trim();
+    if (!code) return;
+    $('btnAddCode').disabled = true;
+    const res = await window.memedrop.addUserCode(code);
+    $('btnAddCode').disabled = false;
+    if (res && res.ok) {
+      $('newCodeInput').value = '';
+    } else if (res && res.error === 'duplicate') {
+      alert('Ce salon est deja dans ta liste.');
+    } else {
+      alert('Impossible d\'ajouter ce salon.');
+    }
+  }
+  $('btnAddCode').addEventListener('click', addCode);
+  $('newCodeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addCode(); });
+
   $('btnBack').addEventListener('click', () => window.memedrop.backToWelcome());
   $('btnQuit').addEventListener('click', () => window.memedrop.quitApp());
 
   window.memedrop.onUserState((s) => {
-    state.volume = s.volume ?? state.volume;
-    state.muted = !!s.muted;
-    state.disabled = !!s.disabled;
-    state.autoLaunch = !!s.autoLaunch;
-    state.overlayPosition = s.overlayPosition || state.overlayPosition;
-    renderRoom(s);
+    applyState(s);
+    renderRooms();
     renderAudio();
   });
 
