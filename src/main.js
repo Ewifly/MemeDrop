@@ -433,13 +433,13 @@ function createAdminWindow() {
 }
 
 function attachCloseBehavior(win) {
-  // Clic sur la croix = minimiser dans la barre des taches. Pour quitter
-  // completement, utiliser le bouton "Quitter MemeDrop" dans la page,
-  // ou "Quitter" dans le menu tray (clic droit).
+  // Clic sur la croix = cache la fenetre dans le tray (icone fleche en bas
+  // a droite). Pour quitter completement, utiliser "Quitter MemeDrop" dans
+  // la page ou "Quitter" dans le menu tray (clic droit).
   win.on('close', (e) => {
     if (app.isQuiting) return;
     e.preventDefault();
-    win.minimize();
+    win.hide();
   });
 }
 
