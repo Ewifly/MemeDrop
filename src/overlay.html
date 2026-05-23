@@ -374,6 +374,7 @@
       whenYtApi(() => {
         try {
           const p = new YT.Player(playerId, {
+            host: 'https://www.youtube-nocookie.com',
             videoId: mediaUrl,
             playerVars: {
               autoplay: 1,
@@ -383,7 +384,8 @@
               fs: 0,
               disablekb: 1,
               playsinline: 1,
-              iv_load_policy: 3
+              iv_load_policy: 3,
+              origin: 'https://www.youtube-nocookie.com'
             },
             events: {
               onReady: (e) => {

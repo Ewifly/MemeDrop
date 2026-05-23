@@ -106,6 +106,24 @@ async function resolveTikTokShortUrl(shortUrl) {
   }
 }
 
+// Recupere l'URL directe MP4 d'une video TikTok via l'API publique tikwm.com.
+// Permet de jouer le TikTok comme une video HTML5 normale (sans iframe ni cookie wall).
+// Renvoie null si echec (rate limit, video privee, etc.) - le client tombera sur iframe.
+async function resolveTikTokDirectMp4(originalUrl) {
+  try {
+    const apiUrl = 'https://tikwm.com/api/?url=' + encodeURIComponent(originalUrl);
+    const res = await fetch(apiUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MemeDrop)' }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const play = data && data.data && (data.data.play || data.data.wmplay);
+    return play || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function pickMediaFromUrl(url) {
   const ytId = extractYouTubeId(url);
   if (ytId) return { url: ytId, kind: 'youtube' };
@@ -166,17 +184,25 @@ async function handleIncomingMessage(message) {
 
   const urls = extractUrls(text);
   for (const u of urls) {
-    const m = pickMediaFromUrl(u);
-    if (m) {
-      broadcastToRoom(room.code, { type: 'meme', mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u) });
-      return;
-    }
-    if (TIKTOK_SHORT_RE.test(u)) {
-      const ttId = await resolveTikTokShortUrl(u);
+    // TikTok : prioriser la resolution MP4 direct via tikwm pour eviter le cookie wall
+    if (TIKTOK_LONG_RE.test(u) || TIKTOK_SHORT_RE.test(u)) {
+      const mp4 = await resolveTikTokDirectMp4(u);
+      if (mp4) {
+        broadcastToRoom(room.code, { type: 'meme', mediaUrl: mp4, mediaKind: 'video', text: cleanTextFromUrl(text, u) });
+        return;
+      }
+      // Fallback : iframe TikTok (cookie wall mais on a pas mieux)
+      const ttId = TIKTOK_LONG_RE.test(u) ? extractTikTokId(u) : await resolveTikTokShortUrl(u);
       if (ttId) {
         broadcastToRoom(room.code, { type: 'meme', mediaUrl: ttId, mediaKind: 'tiktok', text: cleanTextFromUrl(text, u) });
         return;
       }
+    }
+
+    const m = pickMediaFromUrl(u);
+    if (m) {
+      broadcastToRoom(room.code, { type: 'meme', mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u) });
+      return;
     }
   }
 
