@@ -115,7 +115,7 @@ function createOverlayWindow() {
       allowRunningInsecureContent: true
     }
   });
-  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
 
@@ -194,7 +194,15 @@ function showMeme({ mediaUrl, mediaKind, text, author, customDuration, forceDura
       volume,
       muted
     });
+    // Re-affirme le topmost a chaque show : certaines apps (jeux, video
+    // players) creent leur fenetre en topmost APRES le demarrage de l'overlay,
+    // ce qui peut cacher notre overlay. On force la priorite a nouveau.
+    try {
+      overlayWindow.setAlwaysOnTop(false);
+      overlayWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    } catch (_) {}
     overlayWindow.showInactive();
+    try { overlayWindow.moveTop(); } catch (_) {}
   };
 
   if (overlayWindow.webContents.isLoading()) {
