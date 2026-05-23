@@ -62,6 +62,33 @@
     filter: drop-shadow(0 8px 20px rgba(0,0,0,0.55));
   }
 
+  #author {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 4px;
+  }
+  #author.hidden { display: none; }
+  #author img {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 3px solid #43d68f;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.6), 0 4px 10px rgba(0,0,0,0.5);
+    object-fit: cover;
+    background: #2a2c3c;
+  }
+  #author .author-name {
+    font-weight: 800;
+    font-size: 18px;
+    color: #fff;
+    -webkit-text-stroke: 3px #000;
+    paint-order: stroke fill;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.6);
+    word-break: break-word;
+  }
+
   .tt-wrap {
     position: relative;
     height: 100%;
@@ -132,6 +159,10 @@
 <body>
   <div id="stage">
     <div id="media-wrap">
+      <div id="author" class="hidden">
+        <img id="author-avatar" alt="" />
+        <div class="author-name" id="author-name"></div>
+      </div>
       <div id="media-inner"></div>
       <div id="text"></div>
     </div>
@@ -142,6 +173,9 @@
   const mediaWrap = document.getElementById('media-wrap');
   const mediaInner = document.getElementById('media-inner');
   const textEl = document.getElementById('text');
+  const authorEl = document.getElementById('author');
+  const authorAvatarEl = document.getElementById('author-avatar');
+  const authorNameEl = document.getElementById('author-name');
 
   const MAX_DURATION_MS = 60000; // 1 minute max
 
@@ -176,7 +210,24 @@
     currentMediaKind = null;
     mediaInner.innerHTML = '';
     textEl.textContent = '';
+    authorEl.classList.add('hidden');
+    authorAvatarEl.removeAttribute('src');
+    authorNameEl.textContent = '';
     stage.classList.remove('text-only', 'show', 'hide');
+  }
+
+  function renderAuthor(author) {
+    if (!author || !author.name) {
+      authorEl.classList.add('hidden');
+      return;
+    }
+    authorNameEl.textContent = author.name;
+    if (author.avatarUrl) {
+      authorAvatarEl.src = author.avatarUrl;
+    } else {
+      authorAvatarEl.removeAttribute('src');
+    }
+    authorEl.classList.remove('hidden');
   }
 
   function scheduleHide(durationMs) {
@@ -202,9 +253,10 @@
     return Math.min(MAX_DURATION_MS, Math.max(2000, ms));
   }
 
-  function render({ mediaUrl, mediaKind, text, duration, volume, muted }) {
+  function render({ mediaUrl, mediaKind, text, author, duration, volume, muted }) {
     clearStage();
     textEl.textContent = text || '';
+    renderAuthor(author);
 
     const cfgMs = Math.max(2000, Number(duration) || 8000);
     currentVolume = Math.max(0, Math.min(100, Number(volume ?? 80)));

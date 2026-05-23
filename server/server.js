@@ -163,10 +163,14 @@ async function handleIncomingMessage(message) {
   if (!room) return; // ce channel n'est pas mappe a une room
 
   const text = (message.content || '').trim();
+  const author = {
+    name: message.member?.displayName || message.author.globalName || message.author.username,
+    avatarUrl: message.author.displayAvatarURL({ size: 128, extension: 'png' })
+  };
 
   const fromAttach = pickMediaFromAttachments(message.attachments);
   if (fromAttach) {
-    broadcastToRoom(room.code, { type: 'meme', mediaUrl: fromAttach.url, mediaKind: fromAttach.kind, text });
+    broadcastToRoom(room.code, { type: 'meme', mediaUrl: fromAttach.url, mediaKind: fromAttach.kind, text, author });
     return;
   }
 
@@ -176,20 +180,20 @@ async function handleIncomingMessage(message) {
     if (TIKTOK_LONG_RE.test(u) || TIKTOK_SHORT_RE.test(u)) {
       const mp4 = await resolveTikTokDirectMp4(u);
       if (mp4) {
-        broadcastToRoom(room.code, { type: 'meme', mediaUrl: mp4, mediaKind: 'video', text: cleanTextFromUrl(text, u) });
+        broadcastToRoom(room.code, { type: 'meme', mediaUrl: mp4, mediaKind: 'video', text: cleanTextFromUrl(text, u), author });
         return;
       }
       // Fallback : iframe TikTok (cookie wall mais on a pas mieux)
       const ttId = TIKTOK_LONG_RE.test(u) ? extractTikTokId(u) : await resolveTikTokShortUrl(u);
       if (ttId) {
-        broadcastToRoom(room.code, { type: 'meme', mediaUrl: ttId, mediaKind: 'tiktok', text: cleanTextFromUrl(text, u) });
+        broadcastToRoom(room.code, { type: 'meme', mediaUrl: ttId, mediaKind: 'tiktok', text: cleanTextFromUrl(text, u), author });
         return;
       }
     }
 
     const m = pickMediaFromUrl(u);
     if (m) {
-      broadcastToRoom(room.code, { type: 'meme', mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u) });
+      broadcastToRoom(room.code, { type: 'meme', mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u), author });
       return;
     }
   }
@@ -201,7 +205,8 @@ async function handleIncomingMessage(message) {
       type: 'meme',
       mediaUrl: fromEmbedNow.url,
       mediaKind: fromEmbedNow.kind,
-      text: usedUrl ? cleanTextFromUrl(text, usedUrl) : text
+      text: usedUrl ? cleanTextFromUrl(text, usedUrl) : text,
+      author
     });
     return;
   }
@@ -216,7 +221,8 @@ async function handleIncomingMessage(message) {
           type: 'meme',
           mediaUrl: m.url,
           mediaKind: m.kind,
-          text: cleanTextFromUrl(text, urls[0])
+          text: cleanTextFromUrl(text, urls[0]),
+          author
         });
       }
     };
@@ -226,13 +232,13 @@ async function handleIncomingMessage(message) {
     };
     const timer = setTimeout(() => {
       cleanup();
-      if (text) broadcastToRoom(room.code, { type: 'meme', mediaUrl: null, mediaKind: null, text });
+      if (text) broadcastToRoom(room.code, { type: 'meme', mediaUrl: null, mediaKind: null, text, author });
     }, 5000);
     if (discordClient) discordClient.on('messageUpdate', onUpdate);
     return;
   }
 
-  if (text) broadcastToRoom(room.code, { type: 'meme', mediaUrl: null, mediaKind: null, text });
+  if (text) broadcastToRoom(room.code, { type: 'meme', mediaUrl: null, mediaKind: null, text, author });
 }
 
 function setStatus(status, tag = '') {

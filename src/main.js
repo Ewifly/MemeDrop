@@ -171,7 +171,7 @@ function positionOverlay(position) {
   overlayWindow.setPosition(x, y);
 }
 
-function showMeme({ mediaUrl, mediaKind, text }) {
+function showMeme({ mediaUrl, mediaKind, text, author }) {
   if (store.get('disabled')) return; // user a coupe la reception
   if (!overlayWindow) createOverlayWindow();
   positionOverlay(store.get('overlayPosition'));
@@ -184,6 +184,7 @@ function showMeme({ mediaUrl, mediaKind, text }) {
       mediaUrl: mediaUrl || null,
       mediaKind: mediaKind || null,
       text: text || '',
+      author: author || null,
       duration,
       volume,
       muted
@@ -257,7 +258,12 @@ function connectWs() {
         notifyUserState();
       }
       if (msg.type === 'meme') {
-        showMeme({ mediaUrl: msg.mediaUrl, mediaKind: msg.mediaKind, text: msg.text });
+        showMeme({
+          mediaUrl: msg.mediaUrl,
+          mediaKind: msg.mediaKind,
+          text: msg.text,
+          author: msg.author
+        });
       }
     } catch (_) {}
   });
