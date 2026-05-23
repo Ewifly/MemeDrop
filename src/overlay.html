@@ -62,23 +62,6 @@
     filter: drop-shadow(0 8px 20px rgba(0,0,0,0.55));
   }
 
-  .yt-wrap {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    max-height: 100%;
-    border-radius: 10px;
-    overflow: hidden;
-    box-shadow: 0 12px 28px rgba(0,0,0,0.55);
-  }
-  .yt-wrap iframe {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    border: 0;
-  }
-
   .tt-wrap {
     position: relative;
     height: 100%;
@@ -117,37 +100,32 @@
   #text {
     flex: 0 0 auto;
     text-align: center;
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1.2;
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1.15;
     color: #fff;
-    -webkit-text-stroke: 3px #000;
+    -webkit-text-stroke: 4px #000;
     paint-order: stroke fill;
     text-shadow: 0 2px 6px rgba(0,0,0,0.7);
     word-break: break-word;
     overflow-wrap: anywhere;
     pointer-events: none;
-    max-height: 84px;
+    max-height: 120px;
     overflow: hidden;
     padding: 0 4px;
   }
   #text:empty { display: none; }
 
-  #progress {
-    flex: 0 0 auto;
-  }
-
-  /* Quand y a pas de media, on centre le texte au milieu et on cache progress */
-  #stage.text-only #media-inner,
-  #stage.text-only #progress { display: none; }
+  /* Quand y a pas de media, on centre le texte au milieu */
+  #stage.text-only #media-inner { display: none; }
   #stage.text-only #text {
     flex: 1 1 auto;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 32px;
+    font-size: 44px;
     max-height: none;
-    -webkit-text-stroke: 4px #000;
+    -webkit-text-stroke: 5px #000;
   }
 </style>
 </head>
@@ -155,7 +133,6 @@
   <div id="stage">
     <div id="media-wrap">
       <div id="media-inner"></div>
-      <div id="progress"><div id="progress-fill"></div></div>
       <div id="text"></div>
     </div>
   </div>
@@ -165,7 +142,6 @@
   const mediaWrap = document.getElementById('media-wrap');
   const mediaInner = document.getElementById('media-inner');
   const textEl = document.getElementById('text');
-  const progressFill = document.getElementById('progress-fill');
 
   const MAX_DURATION_MS = 60000; // 1 minute max
 
@@ -173,48 +149,14 @@
   let queue = [];
   let playing = false;
   let currentMediaEl = null;
-  let currentMediaKind = null; // 'image' | 'video' | 'audio' | 'youtube'
+  let currentMediaKind = null; // 'image' | 'video' | 'audio' | 'tiktok'
   let currentVolume = 80;
   let currentMuted = false;
-
-  // Load YouTube IFrame API
-  let ytApiReady = false;
-  let ytReadyQueue = [];
-  window.onYouTubeIframeAPIReady = () => {
-    ytApiReady = true;
-    ytReadyQueue.forEach((cb) => { try { cb(); } catch (_) {} });
-    ytReadyQueue = [];
-  };
-  (function loadYT() {
-    const s = document.createElement('script');
-    s.src = 'https://www.youtube.com/iframe_api';
-    s.async = true;
-    s.onerror = () => console.error('[overlay] YouTube IFrame API failed to load');
-    document.head.appendChild(s);
-  })();
-  function whenYtApi(cb, onTimeout) {
-    if (ytApiReady) { cb(); return; }
-    let called = false;
-    const wrapped = () => { if (!called) { called = true; cb(); } };
-    ytReadyQueue.push(wrapped);
-    setTimeout(() => {
-      if (called) return;
-      called = true;
-      // Retire wrapped de la queue (si encore present)
-      const i = ytReadyQueue.indexOf(wrapped);
-      if (i >= 0) ytReadyQueue.splice(i, 1);
-      if (typeof onTimeout === 'function') onTimeout();
-    }, 6000);
-  }
 
   function applyVolumeToMedia(volume, muted) {
     if (!currentMediaEl) return;
     try {
-      if (currentMediaKind === 'youtube') {
-        if (typeof currentMediaEl.setVolume === 'function') currentMediaEl.setVolume(volume);
-        if (muted && typeof currentMediaEl.mute === 'function') currentMediaEl.mute();
-        if (!muted && typeof currentMediaEl.unMute === 'function') currentMediaEl.unMute();
-      } else if (currentMediaKind === 'video' || currentMediaKind === 'audio') {
+      if (currentMediaKind === 'video' || currentMediaKind === 'audio') {
         currentMediaEl.volume = volume / 100;
         currentMediaEl.muted = muted;
       }
@@ -224,12 +166,7 @@
   function pauseCurrentMedia() {
     if (!currentMediaEl) return;
     try {
-      if (currentMediaKind === 'youtube') {
-        if (typeof currentMediaEl.stopVideo === 'function') currentMediaEl.stopVideo();
-        if (typeof currentMediaEl.destroy === 'function') currentMediaEl.destroy();
-      } else if (typeof currentMediaEl.pause === 'function') {
-        currentMediaEl.pause();
-      }
+      if (typeof currentMediaEl.pause === 'function') currentMediaEl.pause();
     } catch (_) {}
   }
 
@@ -240,22 +177,10 @@
     mediaInner.innerHTML = '';
     textEl.textContent = '';
     stage.classList.remove('text-only', 'show', 'hide');
-    progressFill.style.transition = 'none';
-    progressFill.style.transform = 'scaleX(1)';
-  }
-
-  function startProgress(durationMs) {
-    progressFill.style.transition = 'none';
-    progressFill.style.transform = 'scaleX(1)';
-    // force reflow pour que la transition demarre proprement
-    void progressFill.offsetWidth;
-    progressFill.style.transition = `transform ${durationMs}ms linear`;
-    progressFill.style.transform = 'scaleX(0)';
   }
 
   function scheduleHide(durationMs) {
     if (hideTimer) clearTimeout(hideTimer);
-    startProgress(durationMs);
     hideTimer = setTimeout(() => {
       stage.classList.remove('show');
       stage.classList.add('hide');
@@ -365,38 +290,6 @@
       setTimeout(() => {
         if (!stage.classList.contains('show')) { showStage(); scheduleHide(capMs(cfgMs)); }
       }, 4000);
-      return;
-    }
-
-    if (mediaKind === 'youtube') {
-      currentMediaKind = 'youtube';
-      const wrap = document.createElement('div');
-      wrap.className = 'yt-wrap';
-      const iframe = document.createElement('iframe');
-      const params = new URLSearchParams({
-        autoplay: '1',
-        controls: '0',
-        modestbranding: '1',
-        rel: '0',
-        fs: '0',
-        disablekb: '1',
-        playsinline: '1',
-        iv_load_policy: '3',
-        mute: currentMuted ? '1' : '0'
-      });
-      iframe.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(mediaUrl) + '?' + params.toString();
-      iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
-      iframe.setAttribute('allowfullscreen', '');
-      iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-      iframe.onload = () => { showStage(); scheduleHide(capMs(cfgMs)); };
-      iframe.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
-      wrap.appendChild(iframe);
-      mediaInner.appendChild(wrap);
-      currentMediaEl = iframe;
-      // Safety net si onload jamais
-      setTimeout(() => {
-        if (!stage.classList.contains('show')) { showStage(); scheduleHide(capMs(cfgMs)); }
-      }, 5000);
       return;
     }
 

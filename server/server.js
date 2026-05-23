@@ -78,14 +78,6 @@ function pickMediaFromAttachments(attachments) {
   return null;
 }
 
-const YOUTUBE_RE = /(?:youtube\.com\/watch\?[^\s]*v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/i;
-
-function extractYouTubeId(url) {
-  if (!url) return null;
-  const m = String(url).match(YOUTUBE_RE);
-  return m ? m[1] : null;
-}
-
 const TIKTOK_LONG_RE = /tiktok\.com\/(?:@[^/]+\/video\/|v\/)([0-9]+)/i;
 const TIKTOK_SHORT_RE = /(?:vm|vt)\.tiktok\.com\/([A-Za-z0-9]+)/i;
 
@@ -125,8 +117,6 @@ async function resolveTikTokDirectMp4(originalUrl) {
 }
 
 function pickMediaFromUrl(url) {
-  const ytId = extractYouTubeId(url);
-  if (ytId) return { url: ytId, kind: 'youtube' };
   const ttId = extractTikTokId(url);
   if (ttId) return { url: ttId, kind: 'tiktok' };
   const cleaned = url.split('?')[0].split('#')[0];
@@ -139,8 +129,6 @@ function pickMediaFromUrl(url) {
 function pickMediaFromEmbeds(embeds) {
   if (!embeds || !embeds.length) return null;
   for (const e of embeds) {
-    const ytId = extractYouTubeId(e.url) || extractYouTubeId(e.video?.url);
-    if (ytId) return { url: ytId, kind: 'youtube' };
     const ttId = extractTikTokId(e.url) || extractTikTokId(e.video?.url);
     if (ttId) {
       // Si Discord a un MP4 direct dans embed.video.url, prefer le (lecture HTML5)
