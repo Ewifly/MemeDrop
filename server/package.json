@@ -1,0 +1,13 @@
+{
+  "name": "memedrop-server",
+  "version": "0.1.0",
+  "description": "Serveur MemeDrop : bot Discord + WebSocket broadcast",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "ws": "^8.18.0"
+  }
+}

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Server runtime config (contient le token Discord, JAMAIS commit)
+server/config.json
+config.json
+
+# Build output Electron
+out/
+
+# IDE
+.vscode/
+.idea/
+
+# Local env / secrets
+.env
+.env.local
+*.pem
+*.key

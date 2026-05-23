@@ -1,0 +1,307 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>MemeDrop - Admin</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #1e1f2b;
+    color: #e6e6f0;
+    font-family: 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+  }
+  .wrap { padding: 22px 26px; }
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .back-btn {
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    color: #e6e6f0;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background 120ms;
+  }
+  .back-btn:hover { background: #34374a; border-color: #5865F2; }
+  h1 {
+    margin: 0;
+    font-size: 22px;
+    background: linear-gradient(90deg, #5865F2, #eb459e);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .sub { color: #9aa0b4; font-size: 12px; margin-bottom: 16px; }
+
+  .section {
+    background: #25273a;
+    border: 1px solid #32354a;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .section h2 {
+    margin: 0 0 12px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #b9bccd;
+  }
+
+  .field { margin-bottom: 12px; }
+  .field:last-child { margin-bottom: 0; }
+  label {
+    display: block;
+    font-size: 11px;
+    color: #9aa0b4;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  input[type=text], input[type=password], input[type=number], select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 11px;
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    border-radius: 7px;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: #5865F2; }
+  .hint { font-size: 11px; color: #7c8099; margin-top: 4px; }
+  .hint a { color: #8ea0ff; cursor: pointer; }
+
+  .row { display: flex; gap: 10px; }
+  .row > .field { flex: 1; }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .check input { width: 16px; height: 16px; }
+
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  button {
+    padding: 9px 14px;
+    border-radius: 7px;
+    border: none;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .btn-primary { background: #5865F2; color: #fff; }
+  .btn-primary:hover { background: #4752c4; }
+  .btn-secondary { background: #2a2c3c; color: #e6e6f0; border: 1px solid #3a3d52; }
+  .btn-secondary:hover { background: #34374a; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .b-ok { background: #1f4d3a; color: #43d68f; }
+  .b-warn { background: #5a4a1a; color: #f5c85c; }
+  .b-err { background: #5a1f1f; color: #f06363; }
+  .b-idle { background: #34374a; color: #b9bccd; }
+
+  .status-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 12.5px;
+  }
+  .status-line:last-child { margin-bottom: 0; }
+  .status-line .key { color: #9aa0b4; }
+  .status-line .val { font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <button class="back-btn" id="btnBack" title="Retour au menu">&#8592;</button>
+    <h1>MemeDrop - Admin</h1>
+  </div>
+  <div class="sub">Le bot Discord tourne sur le serveur, pas sur ton PC.</div>
+
+  <div class="section">
+    <h2>Connexion serveur</h2>
+    <div class="field">
+      <label>URL du serveur (ws:// ou wss://)</label>
+      <input type="text" id="serverUrl" placeholder="ws://1.2.3.4:8787" />
+    </div>
+    <div class="field">
+      <label>Mot de passe admin</label>
+      <input type="password" id="adminPassword" placeholder="123456" />
+    </div>
+    <div class="actions">
+      <button class="btn-secondary" id="btnSaveLocal">Sauvegarder & reconnecter</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Bot Discord (cote serveur)</h2>
+    <div class="field">
+      <label>Token du bot Discord</label>
+      <input type="password" id="botToken" placeholder="MTAxxxxxxx..." autocomplete="off" />
+      <div class="hint">Cree sur <a id="lnkDevPortal">discord.com/developers</a> avec MESSAGE CONTENT INTENT active.</div>
+    </div>
+    <div class="field">
+      <label>ID du channel</label>
+      <input type="text" id="channelId" placeholder="123456789012345678" />
+    </div>
+    <div class="actions">
+      <button class="btn-primary" id="btnPush">Envoyer au serveur</button>
+      <button class="btn-secondary" id="btnRefresh">Rafraichir statut</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Statut</h2>
+    <div class="status-line"><span class="key">Client WS</span><span class="val" id="wsState"><span class="badge b-idle">...</span></span></div>
+    <div class="status-line"><span class="key">Serveur</span><span class="val" id="srvReachable"><span class="badge b-idle">...</span></span></div>
+    <div class="status-line"><span class="key">Bot Discord</span><span class="val" id="botState"><span class="badge b-idle">...</span></span></div>
+    <div class="status-line"><span class="key">Clients connectes</span><span class="val" id="nbClients">-</span></div>
+  </div>
+
+  <div class="section">
+    <h2>Overlay (local a ton PC)</h2>
+    <div class="row">
+      <div class="field">
+        <label>Position</label>
+        <select id="overlayPosition">
+          <option value="bottom-right">Bas droite</option>
+          <option value="bottom-left">Bas gauche</option>
+          <option value="top-right">Haut droite</option>
+          <option value="top-left">Haut gauche</option>
+          <option value="center">Centre</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Duree (ms)</label>
+        <input type="number" id="overlayDurationMs" min="2000" max="60000" step="500" />
+      </div>
+    </div>
+    <label class="check">
+      <input type="checkbox" id="autoLaunch" />
+      Lancer MemeDrop au demarrage de Windows
+    </label>
+    <div class="actions">
+      <button class="btn-secondary" id="btnTestLocal">Test local</button>
+      <button class="btn-secondary" id="btnTestBroadcast">Test broadcast (tous les clients)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function badge(text, cls) {
+    return `<span class="badge ${cls}">${text}</span>`;
+  }
+
+  async function load() {
+    const s = await window.memedrop.getAdminState();
+    $('serverUrl').value = s.serverUrl || '';
+    $('adminPassword').value = s.adminPassword || '';
+    $('overlayPosition').value = s.overlayPosition || 'bottom-right';
+    $('overlayDurationMs').value = s.overlayDurationMs || 8000;
+    $('autoLaunch').checked = !!s.autoLaunch;
+    renderWsState(s.wsState);
+    refreshServerStatus();
+  }
+
+  function renderWsState(state) {
+    const map = {
+      connected: { t: 'Connecte', c: 'b-ok' },
+      connecting: { t: 'Connexion...', c: 'b-warn' },
+      disconnected: { t: 'Deconnecte', c: 'b-err' },
+      error: { t: 'Erreur', c: 'b-err' },
+      no_url: { t: 'Pas d\'URL', c: 'b-err' },
+      idle: { t: 'Idle', c: 'b-idle' }
+    };
+    const m = map[state] || map.idle;
+    $('wsState').innerHTML = badge(m.t, m.c);
+  }
+
+  async function refreshServerStatus() {
+    const res = await window.memedrop.serverStatus();
+    if (!res.ok) {
+      $('srvReachable').innerHTML = badge('Injoignable / mdp KO', 'b-err');
+      $('botState').innerHTML = badge('-', 'b-idle');
+      $('nbClients').textContent = '-';
+      return;
+    }
+    $('srvReachable').innerHTML = badge('Joignable', 'b-ok');
+    const b = res.body || {};
+    let bState = b.status || 'inconnu';
+    let cls = 'b-warn';
+    if (bState === 'connected') cls = 'b-ok';
+    if (bState.startsWith('error') || bState.startsWith('login_failed')) cls = 'b-err';
+    if (bState === 'stopped' || bState === 'unconfigured') cls = 'b-idle';
+    $('botState').innerHTML = badge(bState + (b.tag ? ' (' + b.tag + ')' : ''), cls);
+    $('nbClients').textContent = b.clients ?? '-';
+  }
+
+  $('btnSaveLocal').addEventListener('click', async () => {
+    await window.memedrop.saveLocal({
+      serverUrl: $('serverUrl').value.trim(),
+      adminPassword: $('adminPassword').value,
+      overlayPosition: $('overlayPosition').value,
+      overlayDurationMs: Number($('overlayDurationMs').value),
+      autoLaunch: $('autoLaunch').checked
+    });
+    setTimeout(refreshServerStatus, 800);
+  });
+
+  $('btnPush').addEventListener('click', async () => {
+    $('btnPush').disabled = true;
+    $('btnPush').textContent = 'Envoi...';
+    const res = await window.memedrop.pushConfig({
+      botToken: $('botToken').value.trim(),
+      channelId: $('channelId').value.trim()
+    });
+    $('btnPush').disabled = false;
+    $('btnPush').textContent = res.ok ? 'Envoye !' : 'Echec : ' + (res.body?.error || res.status);
+    setTimeout(() => { $('btnPush').textContent = 'Envoyer au serveur'; }, 2500);
+    if (res.ok) $('botToken').value = ''; // ne garde pas le token affiche
+    refreshServerStatus();
+  });
+
+  $('btnBack').addEventListener('click', () => window.memedrop.backToWelcome());
+  $('btnRefresh').addEventListener('click', refreshServerStatus);
+  $('btnTestLocal').addEventListener('click', () => window.memedrop.testOverlayLocal());
+  $('btnTestBroadcast').addEventListener('click', async () => {
+    await window.memedrop.broadcastTest();
+  });
+  $('lnkDevPortal').addEventListener('click', () => window.memedrop.openLink('https://discord.com/developers/applications'));
+
+  window.memedrop.onWsStatus((s) => renderWsState(s.state));
+
+  setInterval(refreshServerStatus, 5000);
+  load();
+</script>
+</body>
+</html>

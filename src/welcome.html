@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>MemeDrop</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #1e1f2b;
+    color: #e6e6f0;
+    font-family: 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .wrap {
+    text-align: center;
+    padding: 30px;
+    max-width: 380px;
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: 28px;
+    background: linear-gradient(90deg, #5865F2, #eb459e);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .sub {
+    color: #9aa0b4;
+    font-size: 13px;
+    margin-bottom: 28px;
+  }
+  .cards { display: flex; gap: 14px; }
+  .card {
+    flex: 1;
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    border-radius: 12px;
+    padding: 22px 14px;
+    cursor: pointer;
+    transition: transform 120ms, border-color 120ms, background 120ms;
+    user-select: none;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    background: #34374a;
+    border-color: #5865F2;
+  }
+  .card .icon {
+    font-size: 32px;
+    margin-bottom: 10px;
+  }
+  .card .label {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .card .desc {
+    font-size: 11px;
+    color: #9aa0b4;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>MemeDrop</h1>
+    <div class="sub">Choisis ton mode</div>
+
+    <div class="cards">
+      <div class="card" id="cardUser">
+        <div class="icon">👤</div>
+        <div class="label">User</div>
+        <div class="desc">Recevoir les memes. Rien d'autre a faire.</div>
+      </div>
+      <div class="card" id="cardAdmin">
+        <div class="icon">🔧</div>
+        <div class="label">Admin</div>
+        <div class="desc">Configurer le bot Discord du serveur.</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  document.getElementById('cardUser').addEventListener('click', () => {
+    window.memedrop.chooseMode('user');
+  });
+  document.getElementById('cardAdmin').addEventListener('click', () => {
+    window.memedrop.chooseMode('admin');
+  });
+</script>
+</body>
+</html>

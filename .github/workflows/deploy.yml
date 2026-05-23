@@ -1,0 +1,30 @@
+name: Deploy server to VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            set -e
+            cd ~/memedrop
+            git pull origin main
+            cd server
+            npm install --omit=dev --no-audit --no-fund
+            sudo systemctl restart memedrop
+            sleep 2
+            sudo systemctl is-active memedrop

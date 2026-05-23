@@ -1,0 +1,203 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>MemeDrop Overlay</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Segoe UI', Roboto, sans-serif;
+    color: #fff;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #stage {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+    transition: opacity 300ms ease, transform 320ms cubic-bezier(.2,.9,.3,1.2);
+  }
+  #stage.show { opacity: 1; transform: translateY(0) scale(1); }
+  #stage.hide { opacity: 0; transform: translateY(-18px) scale(0.96); }
+
+  #media-wrap {
+    position: relative;
+    max-width: 100%;
+    max-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #media-wrap img,
+  #media-wrap video {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    border-radius: 10px;
+    filter: drop-shadow(0 12px 28px rgba(0,0,0,0.55));
+  }
+
+  #text {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 14px;
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #fff;
+    text-shadow:
+      0 0 4px rgba(0,0,0,0.95),
+      0 2px 6px rgba(0,0,0,0.85),
+      0 0 12px rgba(0,0,0,0.6);
+    word-wrap: break-word;
+    pointer-events: none;
+  }
+  #text:empty { display: none; }
+
+  /* Quand y a pas de media, on centre juste le texte au milieu */
+  #stage.text-only #media-wrap { display: none; }
+  #stage.text-only #text {
+    position: static;
+    font-size: 32px;
+    padding: 0 20px;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="media-wrap"></div>
+    <div id="text"></div>
+  </div>
+
+<script>
+  const stage = document.getElementById('stage');
+  const mediaWrap = document.getElementById('media-wrap');
+  const textEl = document.getElementById('text');
+
+  let hideTimer = null;
+  let queue = [];
+  let playing = false;
+  let currentMediaEl = null;
+
+  function clearStage() {
+    mediaWrap.innerHTML = '';
+    textEl.textContent = '';
+    stage.classList.remove('text-only', 'show', 'hide');
+    if (currentMediaEl) {
+      try { currentMediaEl.pause && currentMediaEl.pause(); } catch (_) {}
+      currentMediaEl = null;
+    }
+  }
+
+  function scheduleHide(durationMs) {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      stage.classList.remove('show');
+      stage.classList.add('hide');
+      setTimeout(() => {
+        clearStage();
+        playing = false;
+        next();
+      }, 340);
+    }, durationMs);
+  }
+
+  function showStage() {
+    requestAnimationFrame(() => {
+      stage.classList.add('show');
+    });
+  }
+
+  function render({ mediaUrl, mediaKind, text, duration }) {
+    clearStage();
+    textEl.textContent = text || '';
+
+    const cfgMs = Math.max(2000, Number(duration) || 8000);
+
+    if (!mediaUrl) {
+      stage.classList.add('text-only');
+      showStage();
+      scheduleHide(cfgMs);
+      return;
+    }
+
+    if (mediaKind === 'image') {
+      const img = new Image();
+      img.onload = () => { showStage(); scheduleHide(cfgMs); };
+      img.onerror = () => { showStage(); scheduleHide(cfgMs); };
+      img.src = mediaUrl;
+      mediaWrap.appendChild(img);
+      currentMediaEl = img;
+      return;
+    }
+
+    if (mediaKind === 'video') {
+      const v = document.createElement('video');
+      v.src = mediaUrl;
+      v.autoplay = true;
+      v.muted = false;
+      v.playsInline = true;
+      v.controls = false;
+      v.onloadedmetadata = () => {
+        const mediaMs = (v.duration && isFinite(v.duration)) ? v.duration * 1000 : cfgMs;
+        showStage();
+        scheduleHide(Math.max(mediaMs, cfgMs));
+      };
+      v.onerror = () => { showStage(); scheduleHide(cfgMs); };
+      mediaWrap.appendChild(v);
+      currentMediaEl = v;
+      // Autoplay sometimes needs explicit play() in Electron
+      v.play().catch(() => {});
+      return;
+    }
+
+    if (mediaKind === 'audio') {
+      // Pas de visuel pour l'audio : on traite comme text-only mais on joue le son
+      stage.classList.add('text-only');
+      const a = new Audio(mediaUrl);
+      a.autoplay = true;
+      a.onloadedmetadata = () => {
+        const mediaMs = (a.duration && isFinite(a.duration)) ? a.duration * 1000 : cfgMs;
+        showStage();
+        scheduleHide(Math.max(mediaMs, cfgMs));
+      };
+      a.onerror = () => { showStage(); scheduleHide(cfgMs); };
+      a.play().catch(() => {});
+      currentMediaEl = a;
+      return;
+    }
+
+    // Fallback : type inconnu, juste texte
+    stage.classList.add('text-only');
+    showStage();
+    scheduleHide(cfgMs);
+  }
+
+  function next() {
+    if (playing) return;
+    const item = queue.shift();
+    if (!item) return;
+    playing = true;
+    render(item);
+  }
+
+  window.memedrop.onMeme((data) => {
+    queue.push(data);
+    next();
+  });
+</script>
+</body>
+</html>
