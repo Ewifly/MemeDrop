@@ -3,15 +3,23 @@ const path = require('path');
 const Store = require('electron-store');
 const WebSocket = require('ws');
 
-// URL par defaut du serveur MemeDrop (a editer avant de build pour distribuer aux amis)
-const DEFAULT_SERVER_URL = 'ws://localhost:8787';
-const DEFAULT_ADMIN_PASSWORD = '123456';
+// =============================================================================
+// CONSTANTES A EDITER AVANT DE BUILD POUR DISTRIBUTION
+// =============================================================================
+// URL du serveur MemeDrop (mets celle de ton VPS avant de build le .exe pour tes potes)
+const DEFAULT_SERVER_URL = 'ws://57.131.40.94:8787';
+
+// Mot de passe en dur qui protege l'acces au panneau admin de l'app cliente.
+// Change-le avant de distribuer le .exe a tes amis.
+const APP_ADMIN_PASSWORD = 'TonMdpAdmin';
+// =============================================================================
 
 const store = new Store({
   defaults: {
     mode: null, // null | 'admin' | 'user'
     serverUrl: DEFAULT_SERVER_URL,
-    adminPassword: DEFAULT_ADMIN_PASSWORD,
+    serverAdminPassword: '',
+    userCode: '',
     overlayDurationMs: 8000,
     overlayPosition: 'bottom-right',
     autoLaunch: true
@@ -52,7 +60,7 @@ function ensureAutoLaunch() {
 }
 
 function httpUrlFromWs(wsUrl) {
-  return wsUrl.replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:').replace(/\/feed\/?$/, '');
+  return (wsUrl || '').replace(/^ws:/i, 'http:').replace(/^wss:/i, 'https:').replace(/\/feed\/?.*$/, '');
 }
 
 // --- overlay ---
@@ -127,22 +135,41 @@ function showMeme({ mediaUrl, mediaKind, text }) {
   }
 }
 
-// --- WebSocket client (commun admin/user) ---
+// --- WebSocket client ---
+
+function buildWsUrl() {
+  const base = store.get('serverUrl');
+  if (!base) return null;
+  const mode = store.get('mode');
+  const u = base.replace(/\/+$/, '') + '/feed';
+  if (mode === 'user') {
+    const code = store.get('userCode');
+    if (!code) return null;
+    return `${u}?code=${encodeURIComponent(code)}`;
+  }
+  if (mode === 'admin') {
+    const adminPwd = store.get('serverAdminPassword');
+    if (!adminPwd) return null;
+    return `${u}?admin=${encodeURIComponent(adminPwd)}`;
+  }
+  return null;
+}
 
 function connectWs() {
-  const serverUrl = store.get('serverUrl');
-  if (!serverUrl) {
+  closeWs();
+
+  const wsUrl = buildWsUrl();
+  if (!wsUrl) {
     wsState = 'no_url';
     notifyAdminStatus();
     return;
   }
 
-  closeWs();
   wsState = 'connecting';
   notifyAdminStatus();
 
   try {
-    ws = new WebSocket(serverUrl + '/feed');
+    ws = new WebSocket(wsUrl);
   } catch (e) {
     wsState = 'error';
     notifyAdminStatus();
@@ -173,7 +200,6 @@ function connectWs() {
   ws.on('error', () => {
     wsState = 'error';
     notifyAdminStatus();
-    // close event will fire too; reconnect there
   });
 }
 
@@ -203,16 +229,21 @@ function notifyAdminStatus() {
 
 async function adminFetch(pathname, options = {}) {
   const httpBase = httpUrlFromWs(store.get('serverUrl'));
+  if (!httpBase) return { ok: false, status: 0, body: { error: 'no_server_url' } };
   const url = httpBase + pathname;
   const headers = {
     'Content-Type': 'application/json',
-    'X-Admin-Password': store.get('adminPassword') || ''
+    'X-Admin-Password': store.get('serverAdminPassword') || ''
   };
-  const res = await fetch(url, { ...options, headers });
-  const text = await res.text();
-  let body;
-  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
-  return { ok: res.ok, status: res.status, body };
+  try {
+    const res = await fetch(url, { ...options, headers });
+    const text = await res.text();
+    let body;
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+    return { ok: res.ok, status: res.status, body };
+  } catch (e) {
+    return { ok: false, status: 0, body: { error: e.message } };
+  }
 }
 
 // --- Windows ---
@@ -220,8 +251,8 @@ async function adminFetch(pathname, options = {}) {
 function createWelcomeWindow() {
   if (welcomeWindow) { welcomeWindow.focus(); return; }
   welcomeWindow = new BrowserWindow({
-    width: 480,
-    height: 420,
+    width: 520,
+    height: 460,
     resizable: false,
     title: 'MemeDrop',
     icon: iconPath,
@@ -239,9 +270,9 @@ function createWelcomeWindow() {
 function createAdminWindow() {
   if (adminWindow) { adminWindow.focus(); return; }
   adminWindow = new BrowserWindow({
-    width: 560,
-    height: 640,
-    resizable: false,
+    width: 620,
+    height: 820,
+    resizable: true,
     title: 'MemeDrop - Admin',
     icon: iconPath,
     webPreferences: {
@@ -259,27 +290,27 @@ function createAdminWindow() {
 
 function buildTrayMenu() {
   const mode = store.get('mode');
-  const baseItems = [
+  const items = [
     { label: `MemeDrop (${mode || 'non configure'})`, enabled: false },
     { type: 'separator' },
     {
-      label: 'Test overlay',
+      label: 'Test overlay (local)',
       click: () => showMeme({ text: 'Test MemeDrop !', mediaUrl: null, mediaKind: null })
     }
   ];
 
   if (mode === 'admin') {
-    baseItems.push({
-      label: 'Panneau admin',
-      click: () => createAdminWindow()
+    items.push({ label: 'Panneau admin', click: () => createAdminWindow() });
+  }
+  if (mode === 'user') {
+    items.push({
+      label: `Code salon: ${store.get('userCode') || '-'}`,
+      enabled: false
     });
   }
 
-  baseItems.push(
-    {
-      label: 'Reconnecter au serveur',
-      click: () => connectWs()
-    },
+  items.push(
+    { label: 'Reconnecter au serveur', click: () => connectWs() },
     { type: 'separator' },
     {
       label: 'Lancer au demarrage',
@@ -292,20 +323,20 @@ function buildTrayMenu() {
     },
     {
       label: 'Changer de mode',
-      click: () => {
-        store.set('mode', null);
-        if (adminWindow) { adminWindow.close(); adminWindow = null; }
-        createWelcomeWindow();
-        if (tray) tray.setContextMenu(buildTrayMenu());
-      }
+      click: () => goBackToWelcome()
     },
     { type: 'separator' },
-    {
-      label: 'Quitter',
-      click: () => { app.isQuiting = true; app.quit(); }
-    }
+    { label: 'Quitter', click: () => { app.isQuiting = true; app.quit(); } }
   );
-  return Menu.buildFromTemplate(baseItems);
+  return Menu.buildFromTemplate(items);
+}
+
+function goBackToWelcome() {
+  store.set('mode', null);
+  closeWs();
+  if (adminWindow) { adminWindow.close(); adminWindow = null; }
+  if (tray) tray.setContextMenu(buildTrayMenu());
+  createWelcomeWindow();
 }
 
 function createTray() {
@@ -321,27 +352,30 @@ function createTray() {
 
 // --- IPC ---
 
-ipcMain.handle('welcome:choose', (_e, mode) => {
-  if (mode !== 'admin' && mode !== 'user') return false;
-  store.set('mode', mode);
+ipcMain.handle('welcome:choose-user', (_e, code) => {
+  const c = String(code || '').trim();
+  if (!c) return false;
+  store.set('mode', 'user');
+  store.set('userCode', c);
   if (welcomeWindow) { welcomeWindow.close(); welcomeWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
-  if (mode === 'admin') createAdminWindow();
   connectWs();
   return true;
 });
 
-ipcMain.handle('common:back-to-welcome', () => {
-  store.set('mode', null);
-  if (adminWindow) { adminWindow.close(); adminWindow = null; }
+ipcMain.handle('welcome:choose-admin', (_e, pwd) => {
+  if (pwd !== APP_ADMIN_PASSWORD) return false;
+  store.set('mode', 'admin');
+  if (welcomeWindow) { welcomeWindow.close(); welcomeWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
-  createWelcomeWindow();
+  createAdminWindow();
+  connectWs();
   return true;
 });
 
 ipcMain.handle('admin:get-state', () => ({
   serverUrl: store.get('serverUrl'),
-  adminPassword: store.get('adminPassword'),
+  serverAdminPassword: store.get('serverAdminPassword'),
   overlayPosition: store.get('overlayPosition'),
   overlayDurationMs: store.get('overlayDurationMs'),
   autoLaunch: store.get('autoLaunch'),
@@ -350,7 +384,7 @@ ipcMain.handle('admin:get-state', () => ({
 
 ipcMain.handle('admin:save-local', (_e, data) => {
   if (typeof data.serverUrl === 'string') store.set('serverUrl', data.serverUrl.trim());
-  if (typeof data.adminPassword === 'string') store.set('adminPassword', data.adminPassword);
+  if (typeof data.serverAdminPassword === 'string') store.set('serverAdminPassword', data.serverAdminPassword);
   if (typeof data.overlayPosition === 'string') store.set('overlayPosition', data.overlayPosition);
   if (data.overlayDurationMs) store.set('overlayDurationMs', Number(data.overlayDurationMs) || 8000);
   if (typeof data.autoLaunch === 'boolean') store.set('autoLaunch', data.autoLaunch);
@@ -360,32 +394,37 @@ ipcMain.handle('admin:save-local', (_e, data) => {
   return true;
 });
 
-ipcMain.handle('admin:push-config', async (_e, data) => {
-  try {
-    const res = await adminFetch('/admin/config', {
-      method: 'POST',
-      body: JSON.stringify({ botToken: data.botToken, channelId: data.channelId })
-    });
-    return res;
-  } catch (e) {
-    return { ok: false, status: 0, body: { error: e.message } };
-  }
+ipcMain.handle('admin:push-token', async (_e, token) => {
+  return await adminFetch('/admin/token', {
+    method: 'POST',
+    body: JSON.stringify({ botToken: token })
+  });
+});
+
+ipcMain.handle('admin:add-room', async (_e, room) => {
+  return await adminFetch('/admin/rooms', {
+    method: 'POST',
+    body: JSON.stringify({
+      code: room.code,
+      channelId: room.channelId,
+      name: room.name || ''
+    })
+  });
+});
+
+ipcMain.handle('admin:delete-room', async (_e, code) => {
+  return await adminFetch('/admin/rooms/' + encodeURIComponent(code), { method: 'DELETE' });
 });
 
 ipcMain.handle('admin:server-status', async () => {
-  try {
-    return await adminFetch('/admin/status', { method: 'GET' });
-  } catch (e) {
-    return { ok: false, status: 0, body: { error: e.message } };
-  }
+  return await adminFetch('/admin/status', { method: 'GET' });
 });
 
-ipcMain.handle('admin:broadcast-test', async () => {
-  try {
-    return await adminFetch('/admin/test', { method: 'POST' });
-  } catch (e) {
-    return { ok: false, status: 0, body: { error: e.message } };
-  }
+ipcMain.handle('admin:broadcast-test', async (_e, code) => {
+  return await adminFetch('/admin/test', {
+    method: 'POST',
+    body: JSON.stringify(code ? { code } : {})
+  });
 });
 
 ipcMain.handle('admin:test-overlay-local', () => {
@@ -395,6 +434,11 @@ ipcMain.handle('admin:test-overlay-local', () => {
 
 ipcMain.handle('common:open-link', (_e, url) => {
   if (typeof url === 'string' && /^https?:\/\//.test(url)) shell.openExternal(url);
+});
+
+ipcMain.handle('common:back-to-welcome', () => {
+  goBackToWelcome();
+  return true;
 });
 
 // --- bootstrap ---
@@ -419,9 +463,8 @@ if (!gotLock) {
     if (!mode) {
       createWelcomeWindow();
     } else {
-      if (mode === 'admin') {
-        // Ne pas reouvrir le panneau si on est en --hidden au demarrage Windows
-        if (!process.argv.includes('--hidden')) createAdminWindow();
+      if (mode === 'admin' && !process.argv.includes('--hidden')) {
+        createAdminWindow();
       }
       connectWs();
     }

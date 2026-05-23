@@ -7,7 +7,7 @@
   :root { color-scheme: dark; }
   html, body {
     margin: 0;
-    height: 100%;
+    min-height: 100%;
     background: #1e1f2b;
     color: #e6e6f0;
     font-family: 'Segoe UI', Roboto, sans-serif;
@@ -33,7 +33,6 @@
     align-items: center;
     justify-content: center;
     padding: 0;
-    transition: background 120ms;
   }
   .back-btn:hover { background: #34374a; border-color: #5865F2; }
   h1 {
@@ -89,13 +88,7 @@
   .row { display: flex; gap: 10px; }
   .row > .field { flex: 1; }
 
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-  }
+  .check { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
   .check input { width: 16px; height: 16px; }
 
   .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
@@ -111,6 +104,8 @@
   .btn-primary:hover { background: #4752c4; }
   .btn-secondary { background: #2a2c3c; color: #e6e6f0; border: 1px solid #3a3d52; }
   .btn-secondary:hover { background: #34374a; }
+  .btn-danger { background: #4a1f1f; color: #f06363; border: 1px solid #6e2a2a; }
+  .btn-danger:hover { background: #5a2727; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .badge {
@@ -136,6 +131,47 @@
   .status-line:last-child { margin-bottom: 0; }
   .status-line .key { color: #9aa0b4; }
   .status-line .val { font-weight: 600; }
+
+  .rooms-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+  }
+  .rooms-table th, .rooms-table td {
+    padding: 7px 8px;
+    text-align: left;
+    border-bottom: 1px solid #32354a;
+    font-size: 12.5px;
+  }
+  .rooms-table th {
+    color: #9aa0b4;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10.5px;
+    letter-spacing: 0.4px;
+  }
+  .rooms-table tr:last-child td { border-bottom: none; }
+  .rooms-table .code-cell {
+    font-family: 'Cascadia Code', Consolas, monospace;
+    color: #43d68f;
+    font-weight: 600;
+  }
+  .rooms-table .channel-cell {
+    font-family: 'Cascadia Code', Consolas, monospace;
+    color: #b9bccd;
+    font-size: 11.5px;
+  }
+  .rooms-table button {
+    padding: 4px 9px;
+    font-size: 11px;
+  }
+  .rooms-empty {
+    text-align: center;
+    color: #7c8099;
+    font-size: 12px;
+    padding: 14px 0;
+    font-style: italic;
+  }
 </style>
 </head>
 <body>
@@ -144,7 +180,7 @@
     <button class="back-btn" id="btnBack" title="Retour au menu">&#8592;</button>
     <h1>MemeDrop - Admin</h1>
   </div>
-  <div class="sub">Le bot Discord tourne sur le serveur, pas sur ton PC.</div>
+  <div class="sub">Le bot Discord et les salons sont geres sur le serveur.</div>
 
   <div class="section">
     <h2>Connexion serveur</h2>
@@ -153,8 +189,8 @@
       <input type="text" id="serverUrl" placeholder="ws://1.2.3.4:8787" />
     </div>
     <div class="field">
-      <label>Mot de passe admin</label>
-      <input type="password" id="adminPassword" placeholder="123456" />
+      <label>Mot de passe API serveur</label>
+      <input type="password" id="serverAdminPassword" />
     </div>
     <div class="actions">
       <button class="btn-secondary" id="btnSaveLocal">Sauvegarder & reconnecter</button>
@@ -162,19 +198,51 @@
   </div>
 
   <div class="section">
-    <h2>Bot Discord (cote serveur)</h2>
+    <h2>Bot Discord</h2>
     <div class="field">
       <label>Token du bot Discord</label>
       <input type="password" id="botToken" placeholder="MTAxxxxxxx..." autocomplete="off" />
-      <div class="hint">Cree sur <a id="lnkDevPortal">discord.com/developers</a> avec MESSAGE CONTENT INTENT active.</div>
-    </div>
-    <div class="field">
-      <label>ID du channel</label>
-      <input type="text" id="channelId" placeholder="123456789012345678" />
+      <div class="hint">Cree sur <a id="lnkDevPortal">discord.com/developers</a> avec MESSAGE CONTENT INTENT active. Le bot doit etre invite dans tous les serveurs Discord o&ugrave; sont les channels que tu veux mapper.</div>
     </div>
     <div class="actions">
-      <button class="btn-primary" id="btnPush">Envoyer au serveur</button>
-      <button class="btn-secondary" id="btnRefresh">Rafraichir statut</button>
+      <button class="btn-primary" id="btnPushToken">Envoyer le token au serveur</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Salons</h2>
+    <table class="rooms-table" id="roomsTable">
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Nom</th>
+          <th>Channel ID</th>
+          <th>Clients</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="roomsBody"></tbody>
+    </table>
+    <div class="rooms-empty" id="roomsEmpty">Aucun salon. Ajoute-en un ci-dessous.</div>
+
+    <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid #32354a;">
+      <div class="row">
+        <div class="field">
+          <label>Code du salon</label>
+          <input type="text" id="newRoomCode" placeholder="ex: lycee2025" />
+        </div>
+        <div class="field">
+          <label>Nom (optionnel)</label>
+          <input type="text" id="newRoomName" placeholder="Mes potes du lycee" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Channel ID Discord</label>
+        <input type="text" id="newRoomChannel" placeholder="123456789012345678" />
+      </div>
+      <div class="actions">
+        <button class="btn-primary" id="btnAddRoom">Ajouter / mettre a jour</button>
+      </div>
     </div>
   </div>
 
@@ -183,14 +251,17 @@
     <div class="status-line"><span class="key">Client WS</span><span class="val" id="wsState"><span class="badge b-idle">...</span></span></div>
     <div class="status-line"><span class="key">Serveur</span><span class="val" id="srvReachable"><span class="badge b-idle">...</span></span></div>
     <div class="status-line"><span class="key">Bot Discord</span><span class="val" id="botState"><span class="badge b-idle">...</span></span></div>
-    <div class="status-line"><span class="key">Clients connectes</span><span class="val" id="nbClients">-</span></div>
+    <div class="status-line"><span class="key">Clients connectes (total)</span><span class="val" id="nbClients">-</span></div>
+    <div class="actions">
+      <button class="btn-secondary" id="btnRefresh">Rafraichir</button>
+    </div>
   </div>
 
   <div class="section">
-    <h2>Overlay (local a ton PC)</h2>
+    <h2>Tester / Overlay local</h2>
     <div class="row">
       <div class="field">
-        <label>Position</label>
+        <label>Position overlay</label>
         <select id="overlayPosition">
           <option value="bottom-right">Bas droite</option>
           <option value="bottom-left">Bas gauche</option>
@@ -208,24 +279,25 @@
       <input type="checkbox" id="autoLaunch" />
       Lancer MemeDrop au demarrage de Windows
     </label>
+    <div class="field" style="margin-top: 12px;">
+      <label>Code salon pour test broadcast (vide = tous)</label>
+      <input type="text" id="testRoomCode" placeholder="ex: lycee2025" />
+    </div>
     <div class="actions">
-      <button class="btn-secondary" id="btnTestLocal">Test local</button>
-      <button class="btn-secondary" id="btnTestBroadcast">Test broadcast (tous les clients)</button>
+      <button class="btn-secondary" id="btnTestLocal">Test overlay local</button>
+      <button class="btn-secondary" id="btnTestBroadcast">Test broadcast</button>
     </div>
   </div>
 </div>
 
 <script>
   const $ = (id) => document.getElementById(id);
-
-  function badge(text, cls) {
-    return `<span class="badge ${cls}">${text}</span>`;
-  }
+  function badge(text, cls) { return `<span class="badge ${cls}">${text}</span>`; }
 
   async function load() {
     const s = await window.memedrop.getAdminState();
     $('serverUrl').value = s.serverUrl || '';
-    $('adminPassword').value = s.adminPassword || '';
+    $('serverAdminPassword').value = s.serverAdminPassword || '';
     $('overlayPosition').value = s.overlayPosition || 'bottom-right';
     $('overlayDurationMs').value = s.overlayDurationMs || 8000;
     $('autoLaunch').checked = !!s.autoLaunch;
@@ -246,12 +318,42 @@
     $('wsState').innerHTML = badge(m.t, m.c);
   }
 
+  function renderRooms(rooms) {
+    const body = $('roomsBody');
+    const empty = $('roomsEmpty');
+    body.innerHTML = '';
+    if (!rooms || rooms.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    for (const r of rooms) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="code-cell">${escapeHtml(r.code)}</td>
+        <td>${escapeHtml(r.name || '-')}</td>
+        <td class="channel-cell">${escapeHtml(r.channelId)}</td>
+        <td>${r.connectedClients ?? 0}</td>
+        <td><button class="btn-danger" data-code="${escapeHtml(r.code)}">Supprimer</button></td>
+      `;
+      body.appendChild(tr);
+    }
+    body.querySelectorAll('button[data-code]').forEach((b) => {
+      b.addEventListener('click', () => deleteRoom(b.dataset.code));
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
   async function refreshServerStatus() {
     const res = await window.memedrop.serverStatus();
     if (!res.ok) {
       $('srvReachable').innerHTML = badge('Injoignable / mdp KO', 'b-err');
       $('botState').innerHTML = badge('-', 'b-idle');
       $('nbClients').textContent = '-';
+      renderRooms([]);
       return;
     }
     $('srvReachable').innerHTML = badge('Joignable', 'b-ok');
@@ -259,16 +361,26 @@
     let bState = b.status || 'inconnu';
     let cls = 'b-warn';
     if (bState === 'connected') cls = 'b-ok';
-    if (bState.startsWith('error') || bState.startsWith('login_failed')) cls = 'b-err';
+    if (bState.startsWith && (bState.startsWith('error') || bState.startsWith('login_failed'))) cls = 'b-err';
     if (bState === 'stopped' || bState === 'unconfigured') cls = 'b-idle';
     $('botState').innerHTML = badge(bState + (b.tag ? ' (' + b.tag + ')' : ''), cls);
     $('nbClients').textContent = b.clients ?? '-';
+    renderRooms(b.rooms || []);
   }
+
+  async function deleteRoom(code) {
+    if (!confirm(`Supprimer le salon "${code}" ?`)) return;
+    const res = await window.memedrop.deleteRoom(code);
+    if (res.ok) refreshServerStatus();
+    else alert('Echec: ' + (res.body?.error || res.status));
+  }
+
+  $('btnBack').addEventListener('click', () => window.memedrop.backToWelcome());
 
   $('btnSaveLocal').addEventListener('click', async () => {
     await window.memedrop.saveLocal({
       serverUrl: $('serverUrl').value.trim(),
-      adminPassword: $('adminPassword').value,
+      serverAdminPassword: $('serverAdminPassword').value,
       overlayPosition: $('overlayPosition').value,
       overlayDurationMs: Number($('overlayDurationMs').value),
       autoLaunch: $('autoLaunch').checked
@@ -276,25 +388,40 @@
     setTimeout(refreshServerStatus, 800);
   });
 
-  $('btnPush').addEventListener('click', async () => {
-    $('btnPush').disabled = true;
-    $('btnPush').textContent = 'Envoi...';
-    const res = await window.memedrop.pushConfig({
-      botToken: $('botToken').value.trim(),
-      channelId: $('channelId').value.trim()
-    });
-    $('btnPush').disabled = false;
-    $('btnPush').textContent = res.ok ? 'Envoye !' : 'Echec : ' + (res.body?.error || res.status);
-    setTimeout(() => { $('btnPush').textContent = 'Envoyer au serveur'; }, 2500);
-    if (res.ok) $('botToken').value = ''; // ne garde pas le token affiche
+  $('btnPushToken').addEventListener('click', async () => {
+    const token = $('botToken').value.trim();
+    if (!token) { alert('Token vide'); return; }
+    $('btnPushToken').disabled = true;
+    const res = await window.memedrop.pushToken(token);
+    $('btnPushToken').disabled = false;
+    if (res.ok) { $('botToken').value = ''; alert('Token envoye !'); }
+    else alert('Echec: ' + (res.body?.error || res.status));
     refreshServerStatus();
   });
 
-  $('btnBack').addEventListener('click', () => window.memedrop.backToWelcome());
+  $('btnAddRoom').addEventListener('click', async () => {
+    const code = $('newRoomCode').value.trim();
+    const channelId = $('newRoomChannel').value.trim();
+    const name = $('newRoomName').value.trim();
+    if (!code || !channelId) { alert('Code et Channel ID requis'); return; }
+    $('btnAddRoom').disabled = true;
+    const res = await window.memedrop.addRoom({ code, channelId, name });
+    $('btnAddRoom').disabled = false;
+    if (res.ok) {
+      $('newRoomCode').value = '';
+      $('newRoomChannel').value = '';
+      $('newRoomName').value = '';
+      refreshServerStatus();
+    } else {
+      alert('Echec: ' + (res.body?.error || res.status));
+    }
+  });
+
   $('btnRefresh').addEventListener('click', refreshServerStatus);
   $('btnTestLocal').addEventListener('click', () => window.memedrop.testOverlayLocal());
   $('btnTestBroadcast').addEventListener('click', async () => {
-    await window.memedrop.broadcastTest();
+    const code = $('testRoomCode').value.trim();
+    await window.memedrop.broadcastTest(code || null);
   });
   $('lnkDevPortal').addEventListener('click', () => window.memedrop.openLink('https://discord.com/developers/applications'));
 

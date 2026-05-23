@@ -25,9 +25,13 @@ const clients = new Set();
 
 function loadConfig() {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    return {
+      botToken: raw.botToken || '',
+      rooms: Array.isArray(raw.rooms) ? raw.rooms : []
+    };
   } catch (_) {
-    return { botToken: '', channelId: '' };
+    return { botToken: '', rooms: [] };
   }
 }
 
@@ -35,7 +39,25 @@ function saveConfig() {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
-function broadcast(payload) {
+function findRoomByCode(code) {
+  return config.rooms.find((r) => r.code === code) || null;
+}
+
+function findRoomByChannelId(channelId) {
+  return config.rooms.find((r) => r.channelId === channelId) || null;
+}
+
+function broadcastToRoom(roomCode, payload) {
+  const data = JSON.stringify(payload);
+  for (const ws of clients) {
+    if (ws.readyState !== ws.OPEN) continue;
+    if (ws._admin || ws._room === roomCode) {
+      try { ws.send(data); } catch (_) {}
+    }
+  }
+}
+
+function broadcastToAll(payload) {
   const data = JSON.stringify(payload);
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) {
@@ -87,11 +109,14 @@ function cleanTextFromUrl(text, url) {
 }
 
 function handleIncomingMessage(message) {
+  const room = findRoomByChannelId(message.channelId);
+  if (!room) return; // ce channel n'est pas mappe a une room
+
   const text = (message.content || '').trim();
 
   const fromAttach = pickMediaFromAttachments(message.attachments);
   if (fromAttach) {
-    broadcast({ type: 'meme', mediaUrl: fromAttach.url, mediaKind: fromAttach.kind, text });
+    broadcastToRoom(room.code, { type: 'meme', mediaUrl: fromAttach.url, mediaKind: fromAttach.kind, text });
     return;
   }
 
@@ -99,7 +124,7 @@ function handleIncomingMessage(message) {
   for (const u of urls) {
     const m = pickMediaFromUrl(u);
     if (m) {
-      broadcast({ type: 'meme', mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u) });
+      broadcastToRoom(room.code, { type: 'meme', mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u) });
       return;
     }
   }
@@ -107,7 +132,7 @@ function handleIncomingMessage(message) {
   const fromEmbedNow = pickMediaFromEmbeds(message.embeds);
   if (fromEmbedNow) {
     const usedUrl = urls[0];
-    broadcast({
+    broadcastToRoom(room.code, {
       type: 'meme',
       mediaUrl: fromEmbedNow.url,
       mediaKind: fromEmbedNow.kind,
@@ -122,7 +147,7 @@ function handleIncomingMessage(message) {
       const m = pickMediaFromEmbeds(newMsg.embeds);
       if (m) {
         cleanup();
-        broadcast({
+        broadcastToRoom(room.code, {
           type: 'meme',
           mediaUrl: m.url,
           mediaKind: m.kind,
@@ -136,13 +161,13 @@ function handleIncomingMessage(message) {
     };
     const timer = setTimeout(() => {
       cleanup();
-      if (text) broadcast({ type: 'meme', mediaUrl: null, mediaKind: null, text });
+      if (text) broadcastToRoom(room.code, { type: 'meme', mediaUrl: null, mediaKind: null, text });
     }, 5000);
     if (discordClient) discordClient.on('messageUpdate', onUpdate);
     return;
   }
 
-  if (text) broadcast({ type: 'meme', mediaUrl: null, mediaKind: null, text });
+  if (text) broadcastToRoom(room.code, { type: 'meme', mediaUrl: null, mediaKind: null, text });
 }
 
 function setStatus(status, tag = '') {
@@ -153,7 +178,7 @@ function setStatus(status, tag = '') {
 
 function startDiscord() {
   stopDiscord();
-  if (!config.botToken || !config.channelId) {
+  if (!config.botToken) {
     setStatus('unconfigured');
     return;
   }
@@ -174,7 +199,6 @@ function startDiscord() {
 
   discordClient.on('messageCreate', (message) => {
     if (message.author.bot) return;
-    if (message.channelId !== config.channelId) return;
     handleIncomingMessage(message);
   });
 
@@ -211,13 +235,14 @@ function scheduleReconnect() {
   }, 15000);
 }
 
-// HTTP server (admin API + WS upgrade)
+// --- HTTP server ---
+
 function send(res, code, payload, type = 'application/json') {
   res.statusCode = code;
   res.setHeader('Content-Type', type);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Password');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.end(type === 'application/json' ? JSON.stringify(payload) : payload);
 }
 
@@ -237,6 +262,14 @@ function readJson(req) {
   });
 }
 
+function countClientsPerRoom() {
+  const map = {};
+  for (const ws of clients) {
+    if (ws._room) map[ws._room] = (map[ws._room] || 0) + 1;
+  }
+  return map;
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204, '');
 
@@ -248,33 +281,99 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === '/admin/status' && req.method === 'GET') {
     if (!checkAdmin(req)) return send(res, 401, { error: 'unauthorized' });
+    const perRoom = countClientsPerRoom();
     return send(res, 200, {
       status: discordStatus,
       tag: discordTag,
       clients: clients.size,
-      channelId: config.channelId || '',
-      hasToken: !!config.botToken
+      hasToken: !!config.botToken,
+      rooms: config.rooms.map((r) => ({
+        code: r.code,
+        channelId: r.channelId,
+        name: r.name || '',
+        connectedClients: perRoom[r.code] || 0
+      }))
     });
   }
 
-  if (url.pathname === '/admin/config' && req.method === 'POST') {
+  if (url.pathname === '/admin/token' && req.method === 'POST') {
     if (!checkAdmin(req)) return send(res, 401, { error: 'unauthorized' });
     try {
       const body = await readJson(req);
-      if (typeof body.botToken === 'string' && body.botToken) config.botToken = body.botToken.trim();
-      if (typeof body.channelId === 'string') config.channelId = body.channelId.trim();
+      if (typeof body.botToken !== 'string' || !body.botToken.trim()) {
+        return send(res, 400, { error: 'missing_token' });
+      }
+      config.botToken = body.botToken.trim();
       saveConfig();
       startDiscord();
       return send(res, 200, { ok: true });
-    } catch (e) {
+    } catch {
       return send(res, 400, { error: 'bad_json' });
     }
   }
 
+  if (url.pathname === '/admin/rooms' && req.method === 'GET') {
+    if (!checkAdmin(req)) return send(res, 401, { error: 'unauthorized' });
+    const perRoom = countClientsPerRoom();
+    return send(res, 200, {
+      rooms: config.rooms.map((r) => ({
+        code: r.code,
+        channelId: r.channelId,
+        name: r.name || '',
+        connectedClients: perRoom[r.code] || 0
+      }))
+    });
+  }
+
+  if (url.pathname === '/admin/rooms' && req.method === 'POST') {
+    if (!checkAdmin(req)) return send(res, 401, { error: 'unauthorized' });
+    try {
+      const body = await readJson(req);
+      const code = String(body.code || '').trim();
+      const channelId = String(body.channelId || '').trim();
+      const name = String(body.name || '').trim();
+      if (!code || !channelId) return send(res, 400, { error: 'missing_fields' });
+      const existing = findRoomByCode(code);
+      if (existing) {
+        existing.channelId = channelId;
+        existing.name = name;
+      } else {
+        config.rooms.push({ code, channelId, name });
+      }
+      saveConfig();
+      return send(res, 200, { ok: true });
+    } catch {
+      return send(res, 400, { error: 'bad_json' });
+    }
+  }
+
+  const delMatch = url.pathname.match(/^\/admin\/rooms\/([^/]+)$/);
+  if (delMatch && req.method === 'DELETE') {
+    if (!checkAdmin(req)) return send(res, 401, { error: 'unauthorized' });
+    const code = delMatch[1];
+    const before = config.rooms.length;
+    config.rooms = config.rooms.filter((r) => r.code !== code);
+    saveConfig();
+    return send(res, 200, { ok: true, removed: before - config.rooms.length });
+  }
+
   if (url.pathname === '/admin/test' && req.method === 'POST') {
     if (!checkAdmin(req)) return send(res, 401, { error: 'unauthorized' });
-    broadcast({ type: 'meme', mediaUrl: null, mediaKind: null, text: 'Test depuis le panneau admin !' });
-    return send(res, 200, { ok: true });
+    try {
+      const body = await readJson(req).catch(() => ({}));
+      const code = body && body.code;
+      const payload = {
+        type: 'meme',
+        mediaUrl: null,
+        mediaKind: null,
+        text: code ? `Test broadcast salon ${code}` : 'Test broadcast (tous salons)'
+      };
+      if (code) broadcastToRoom(code, payload);
+      else broadcastToAll(payload);
+      return send(res, 200, { ok: true });
+    } catch {
+      return send(res, 400, { error: 'bad_json' });
+    }
   }
 
   send(res, 404, { error: 'not_found' });
@@ -286,9 +385,34 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
+
+  const adminParam = url.searchParams.get('admin');
+  const code = url.searchParams.get('code');
+
+  // Auth admin via mdp
+  if (adminParam) {
+    if (adminParam !== ADMIN_PASSWORD) { socket.destroy(); return; }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      ws._admin = true;
+      ws._room = null;
+      clients.add(ws);
+      ws.send(JSON.stringify({ type: 'hello', status: discordStatus, tag: discordTag, admin: true }));
+      ws.on('close', () => clients.delete(ws));
+      ws.on('error', () => clients.delete(ws));
+    });
+    return;
+  }
+
+  // Auth user via code de salon
+  if (!code) { socket.destroy(); return; }
+  const room = findRoomByCode(code);
+  if (!room) { socket.destroy(); return; }
+
   wss.handleUpgrade(req, socket, head, (ws) => {
+    ws._admin = false;
+    ws._room = room.code;
     clients.add(ws);
-    ws.send(JSON.stringify({ type: 'hello', status: discordStatus, tag: discordTag }));
+    ws.send(JSON.stringify({ type: 'hello', status: discordStatus, tag: discordTag, room: room.code, roomName: room.name }));
     ws.on('close', () => clients.delete(ws));
     ws.on('error', () => clients.delete(ws));
   });

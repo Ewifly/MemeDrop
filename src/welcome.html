@@ -18,6 +18,7 @@
   .wrap {
     text-align: center;
     padding: 30px;
+    width: 100%;
     max-width: 380px;
   }
   h1 {
@@ -49,48 +50,155 @@
     background: #34374a;
     border-color: #5865F2;
   }
-  .card .icon {
-    font-size: 32px;
-    margin-bottom: 10px;
-  }
-  .card .label {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 4px;
-  }
-  .card .desc {
+  .card .icon { font-size: 32px; margin-bottom: 10px; }
+  .card .label { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .card .desc { font-size: 11px; color: #9aa0b4; line-height: 1.4; }
+
+  .step { display: none; }
+  .step.active { display: block; }
+
+  .field { margin-bottom: 14px; text-align: left; }
+  label {
+    display: block;
     font-size: 11px;
     color: #9aa0b4;
-    line-height: 1.4;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  input[type=text], input[type=password] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 11px 13px;
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 15px;
+    outline: none;
+    text-align: center;
+    letter-spacing: 2px;
+  }
+  input:focus { border-color: #5865F2; }
+
+  .row-btn { display: flex; gap: 8px; margin-top: 16px; }
+  button {
+    flex: 1;
+    padding: 11px 14px;
+    border-radius: 8px;
+    border: none;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .btn-primary { background: #5865F2; color: #fff; }
+  .btn-primary:hover { background: #4752c4; }
+  .btn-secondary { background: #2a2c3c; color: #e6e6f0; border: 1px solid #3a3d52; }
+  .btn-secondary:hover { background: #34374a; }
+
+  .err {
+    margin-top: 12px;
+    color: #f06363;
+    font-size: 12px;
+    min-height: 16px;
   }
 </style>
 </head>
 <body>
   <div class="wrap">
     <h1>MemeDrop</h1>
-    <div class="sub">Choisis ton mode</div>
+    <div class="sub" id="sub">Choisis ton mode</div>
 
-    <div class="cards">
-      <div class="card" id="cardUser">
-        <div class="icon">👤</div>
-        <div class="label">User</div>
-        <div class="desc">Recevoir les memes. Rien d'autre a faire.</div>
+    <!-- Etape 1 : choix mode -->
+    <div class="step active" id="stepChoose">
+      <div class="cards">
+        <div class="card" id="cardUser">
+          <div class="icon">👤</div>
+          <div class="label">User</div>
+          <div class="desc">Recevoir les memes de ton salon.</div>
+        </div>
+        <div class="card" id="cardAdmin">
+          <div class="icon">🔧</div>
+          <div class="label">Admin</div>
+          <div class="desc">Gerer les salons et le bot.</div>
+        </div>
       </div>
-      <div class="card" id="cardAdmin">
-        <div class="icon">🔧</div>
-        <div class="label">Admin</div>
-        <div class="desc">Configurer le bot Discord du serveur.</div>
+    </div>
+
+    <!-- Etape 2A : code de salon (user) -->
+    <div class="step" id="stepUserCode">
+      <div class="field">
+        <label>Code du salon</label>
+        <input type="text" id="userCode" placeholder="ex: lycee2025" autocomplete="off" />
+      </div>
+      <div class="err" id="userErr"></div>
+      <div class="row-btn">
+        <button class="btn-secondary" id="userBack">Retour</button>
+        <button class="btn-primary" id="userOk">Rejoindre</button>
+      </div>
+    </div>
+
+    <!-- Etape 2B : mdp admin (app) -->
+    <div class="step" id="stepAdminPwd">
+      <div class="field">
+        <label>Mot de passe admin de l'app</label>
+        <input type="password" id="adminAppPwd" placeholder="••••••••" autocomplete="off" />
+      </div>
+      <div class="err" id="adminErr"></div>
+      <div class="row-btn">
+        <button class="btn-secondary" id="adminBack">Retour</button>
+        <button class="btn-primary" id="adminOk">Entrer</button>
       </div>
     </div>
   </div>
 
 <script>
-  document.getElementById('cardUser').addEventListener('click', () => {
-    window.memedrop.chooseMode('user');
+  const $ = (id) => document.getElementById(id);
+  const subEl = $('sub');
+
+  function show(stepId, sub) {
+    document.querySelectorAll('.step').forEach((el) => el.classList.remove('active'));
+    $(stepId).classList.add('active');
+    subEl.textContent = sub;
+  }
+
+  $('cardUser').addEventListener('click', () => {
+    show('stepUserCode', 'Entre le code que ton admin t\'a donne');
+    $('userCode').focus();
   });
-  document.getElementById('cardAdmin').addEventListener('click', () => {
-    window.memedrop.chooseMode('admin');
+  $('cardAdmin').addEventListener('click', () => {
+    show('stepAdminPwd', 'Acces restreint');
+    $('adminAppPwd').focus();
   });
+  $('userBack').addEventListener('click', () => {
+    show('stepChoose', 'Choisis ton mode');
+    $('userErr').textContent = '';
+  });
+  $('adminBack').addEventListener('click', () => {
+    show('stepChoose', 'Choisis ton mode');
+    $('adminErr').textContent = '';
+  });
+
+  async function submitUser() {
+    const code = $('userCode').value.trim();
+    if (!code) { $('userErr').textContent = 'Code manquant'; return; }
+    $('userErr').textContent = '';
+    const ok = await window.memedrop.chooseUser(code);
+    if (!ok) $('userErr').textContent = 'Echec';
+  }
+
+  async function submitAdmin() {
+    const pwd = $('adminAppPwd').value;
+    if (!pwd) { $('adminErr').textContent = 'Mot de passe manquant'; return; }
+    $('adminErr').textContent = '';
+    const ok = await window.memedrop.chooseAdmin(pwd);
+    if (!ok) $('adminErr').textContent = 'Mot de passe incorrect';
+  }
+
+  $('userOk').addEventListener('click', submitUser);
+  $('adminOk').addEventListener('click', submitAdmin);
+  $('userCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitUser(); });
+  $('adminAppPwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAdmin(); });
 </script>
 </body>
 </html>
