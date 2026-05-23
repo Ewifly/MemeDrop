@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 
@@ -117,31 +118,79 @@ async function resolveTikTokDirectMp4(originalUrl) {
 }
 
 const INSTAGRAM_RE = /instagram\.com\/(reel|reels|p)\/([A-Za-z0-9_-]+)/i;
+const TWITTER_RE = /(?:twitter\.com|x\.com)\/([^/\s?#]+)\/status\/(\d+)/i;
 
-// Resout une URL Instagram (reel/p) vers son media direct (MP4 ou image)
-// via ddinstagram.com qui expose les meta OG sans login.
-async function resolveInstagramMedia(originalUrl) {
-  try {
-    const m = String(originalUrl).match(INSTAGRAM_RE);
-    if (!m) return null;
-    const ddUrl = 'https://ddinstagram.com/' + m[1] + '/' + m[2];
-    const res = await fetch(ddUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; MemeDrop)',
-        'Accept': 'text/html'
-      },
-      redirect: 'follow'
+// Appelle yt-dlp pour extraire l'URL directe d'une video/image.
+// Retourne null si yt-dlp pas installe, timeout, ou echec.
+function ytDlpGetUrl(originalUrl, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    let proc;
+    try {
+      proc = spawn('yt-dlp', [
+        '-g',
+        '-f', 'best[ext=mp4]/best',
+        '--no-warnings',
+        '--no-playlist',
+        '--socket-timeout', '10',
+        originalUrl
+      ]);
+    } catch (_) {
+      return resolve(null);
+    }
+    let out = '';
+    let killed = false;
+    const timer = setTimeout(() => { killed = true; try { proc.kill(); } catch (_) {}; resolve(null); }, timeoutMs);
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.on('error', () => { clearTimeout(timer); if (!killed) resolve(null); });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return;
+      if (code !== 0) return resolve(null);
+      const url = (out.trim().split('\n')[0] || '').trim();
+      resolve(url && url.startsWith('http') ? url : null);
     });
-    if (!res.ok) return null;
-    const html = await res.text();
-    const videoMatch = html.match(/<meta\s+property=["']og:video["']\s+content=["']([^"']+)["']/i);
-    if (videoMatch) return { url: videoMatch[1].replace(/&amp;/g, '&'), kind: 'video' };
-    const imageMatch = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i);
-    if (imageMatch) return { url: imageMatch[1].replace(/&amp;/g, '&'), kind: 'image' };
-    return null;
-  } catch (_) {
-    return null;
-  }
+  });
+}
+
+function guessKindFromUrl(url) {
+  const c = url.split('?')[0].split('#')[0].toLowerCase();
+  if (/\.(mp4|webm|mov|m4v|m3u8)$/i.test(c)) return 'video';
+  if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(c)) return 'image';
+  if (/\.(mp3|wav|ogg|m4a|flac|opus)$/i.test(c)) return 'audio';
+  return 'video'; // par defaut, on suppose video (cas du streaming)
+}
+
+// Instagram : utilise yt-dlp (les proxies publics ddinstagram/etc sont morts)
+async function resolveInstagramMedia(originalUrl) {
+  const direct = await ytDlpGetUrl(originalUrl);
+  if (direct) return { url: direct, kind: guessKindFromUrl(direct) };
+  return null;
+}
+
+// Twitter/X : essaie vxtwitter API (rapide, JSON propre), fallback yt-dlp
+async function resolveTwitterMedia(originalUrl) {
+  try {
+    const m = String(originalUrl).match(TWITTER_RE);
+    if (m) {
+      const apiUrl = 'https://api.vxtwitter.com/' + encodeURIComponent(m[1]) + '/status/' + m[2];
+      const res = await fetch(apiUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MemeDrop)' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const items = (data && data.media_extended) || [];
+        for (const it of items) {
+          if (!it || !it.url) continue;
+          if (it.type === 'video' || it.type === 'gif') return { url: it.url, kind: 'video' };
+          if (it.type === 'image') return { url: it.url, kind: 'image' };
+        }
+      }
+    }
+  } catch (_) {}
+  // Fallback yt-dlp
+  const direct = await ytDlpGetUrl(originalUrl);
+  if (direct) return { url: direct, kind: guessKindFromUrl(direct) };
+  return null;
 }
 
 function pickMediaFromUrl(url) {
@@ -218,11 +267,20 @@ async function handleIncomingMessage(message) {
       }
     }
 
-    // Instagram (reel/reels/p) : resolution media direct via ddinstagram
+    // Instagram (reel/reels/p) : resolution media direct via yt-dlp
     if (INSTAGRAM_RE.test(u)) {
       const ig = await resolveInstagramMedia(u);
       if (ig) {
         broadcastToRoom(room.code, { type: 'meme', mediaUrl: ig.url, mediaKind: ig.kind, text: cleanTextFromUrl(text, u), author });
+        return;
+      }
+    }
+
+    // Twitter/X : resolution video via vxtwitter API (rapide) ou yt-dlp en fallback
+    if (TWITTER_RE.test(u)) {
+      const tw = await resolveTwitterMedia(u);
+      if (tw) {
+        broadcastToRoom(room.code, { type: 'meme', mediaUrl: tw.url, mediaKind: tw.kind, text: cleanTextFromUrl(text, u), author });
         return;
       }
     }
