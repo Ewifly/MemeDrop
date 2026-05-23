@@ -255,12 +255,13 @@
     return Math.min(MAX_DURATION_MS, Math.max(2000, ms));
   }
 
-  function render({ mediaUrl, mediaKind, text, author, duration, volume, muted }) {
+  function render({ mediaUrl, mediaKind, text, author, duration, forceDuration, volume, muted }) {
     clearStage();
     textEl.textContent = text || '';
     renderAuthor(author);
 
     const cfgMs = Math.max(2000, Number(duration) || 8000);
+    const force = !!forceDuration;
     currentVolume = Math.max(0, Math.min(100, Number(volume ?? 80)));
     currentMuted = !!muted;
     const vol = currentVolume / 100;
@@ -280,14 +281,32 @@
       img.src = mediaUrl;
       mediaInner.appendChild(img);
       currentMediaEl = img;
-      // Force la repetition des GIFs (certains GIFs ne loopent pas tout seuls)
+      // Force la repetition des GIFs (certains GIFs ne loopent pas tout seuls
+      // car le CDN cache et le browser sert depuis le cache). On fetch le GIF
+      // en Blob une fois, puis on swap des ObjectURL frais pour forcer un
+      // re-decodage et donc une nouvelle execution de l'animation.
       if (/\.gif(\?|#|$)/i.test(mediaUrl)) {
-        let n = 0;
-        gifLoopTimer = setInterval(() => {
-          if (!img.parentNode) { clearInterval(gifLoopTimer); gifLoopTimer = null; return; }
-          n++;
-          img.src = mediaUrl + (mediaUrl.includes('?') ? '&' : '?') + '_gl=' + n;
-        }, 4000);
+        let activeObjectUrl = null;
+        fetch(mediaUrl, { cache: 'force-cache' })
+          .then((r) => r.ok ? r.blob() : null)
+          .then((blob) => {
+            if (!blob || !img.parentNode) return;
+            activeObjectUrl = URL.createObjectURL(blob);
+            img.src = activeObjectUrl;
+            gifLoopTimer = setInterval(() => {
+              if (!img.parentNode) {
+                clearInterval(gifLoopTimer);
+                gifLoopTimer = null;
+                if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
+                return;
+              }
+              const old = activeObjectUrl;
+              activeObjectUrl = URL.createObjectURL(blob);
+              img.src = activeObjectUrl;
+              if (old) URL.revokeObjectURL(old);
+            }, 3500);
+          })
+          .catch(() => { /* fallback: GIF restera fige, tant pis */ });
       }
       return;
     }
@@ -304,7 +323,7 @@
       v.onloadedmetadata = () => {
         const mediaMs = (v.duration && isFinite(v.duration)) ? v.duration * 1000 : cfgMs;
         showStage();
-        scheduleHide(capMs(Math.max(mediaMs, cfgMs)));
+        scheduleHide(capMs(force ? cfgMs : Math.max(mediaMs, cfgMs)));
       };
       v.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
       mediaInner.appendChild(v);
@@ -323,7 +342,7 @@
       a.onloadedmetadata = () => {
         const mediaMs = (a.duration && isFinite(a.duration)) ? a.duration * 1000 : cfgMs;
         showStage();
-        scheduleHide(capMs(Math.max(mediaMs, cfgMs)));
+        scheduleHide(capMs(force ? cfgMs : Math.max(mediaMs, cfgMs)));
       };
       a.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
       a.play().catch(() => {});

@@ -263,7 +263,15 @@ async function handleIncomingMessage(message) {
   };
 
   // helper pour construire le payload meme avec la duration custom propagee
-  const meme = (extra) => ({ type: 'meme', author, duration: customDuration, ...extra });
+  // forceDuration: true indique au client d'utiliser duration tel quel
+  // (sans le combiner avec la duree du media)
+  const meme = (extra) => ({
+    type: 'meme',
+    author,
+    duration: customDuration,
+    forceDuration: customDuration != null,
+    ...extra
+  });
 
   const fromAttach = pickMediaFromAttachments(message.attachments);
   if (fromAttach) {

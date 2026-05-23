@@ -171,7 +171,7 @@ function positionOverlay(position) {
   overlayWindow.setPosition(x, y);
 }
 
-function showMeme({ mediaUrl, mediaKind, text, author, customDuration }) {
+function showMeme({ mediaUrl, mediaKind, text, author, customDuration, forceDuration }) {
   if (store.get('disabled')) return; // user a coupe la reception
   if (!overlayWindow) createOverlayWindow();
   positionOverlay(store.get('overlayPosition'));
@@ -190,6 +190,7 @@ function showMeme({ mediaUrl, mediaKind, text, author, customDuration }) {
       text: text || '',
       author: author || null,
       duration,
+      forceDuration: !!forceDuration,
       volume,
       muted
     });
@@ -267,7 +268,8 @@ function connectWs() {
           mediaKind: msg.mediaKind,
           text: msg.text,
           author: msg.author,
-          customDuration: msg.duration || null
+          customDuration: msg.duration || null,
+          forceDuration: !!msg.forceDuration
         });
       }
     } catch (_) {}
