@@ -32,16 +32,20 @@
 
   #media-wrap {
     position: relative;
-    max-width: 100%;
-    max-height: 100%;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: stretch;
     justify-content: center;
+    padding: 12px;
+    box-sizing: border-box;
   }
 
   #media-inner {
     position: relative;
+    width: 100%;
+    flex: 1 1 auto;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -174,11 +178,23 @@
   (function loadYT() {
     const s = document.createElement('script');
     s.src = 'https://www.youtube.com/iframe_api';
+    s.async = true;
+    s.onerror = () => console.error('[overlay] YouTube IFrame API failed to load');
     document.head.appendChild(s);
   })();
-  function whenYtApi(cb) {
-    if (ytApiReady) cb();
-    else ytReadyQueue.push(cb);
+  function whenYtApi(cb, onTimeout) {
+    if (ytApiReady) { cb(); return; }
+    let called = false;
+    const wrapped = () => { if (!called) { called = true; cb(); } };
+    ytReadyQueue.push(wrapped);
+    setTimeout(() => {
+      if (called) return;
+      called = true;
+      // Retire wrapped de la queue (si encore present)
+      const i = ytReadyQueue.indexOf(wrapped);
+      if (i >= 0) ytReadyQueue.splice(i, 1);
+      if (typeof onTimeout === 'function') onTimeout();
+    }, 6000);
   }
 
   function applyVolumeToMedia(volume, muted) {
@@ -322,16 +338,23 @@
       const wrap = document.createElement('div');
       wrap.className = 'tt-wrap';
       const iframe = document.createElement('iframe');
-      iframe.src = 'https://www.tiktok.com/embed/v2/' + encodeURIComponent(mediaUrl) + '?autoplay=1&music_info=0';
+      iframe.src = 'https://www.tiktok.com/player/v1/' + encodeURIComponent(mediaUrl) + '?music_info=1&description=0&autoplay=1';
       iframe.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture');
       iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      iframe.setAttribute('allowfullscreen', '');
       iframe.onload = () => { showStage(); scheduleHide(capMs(cfgMs)); };
-      iframe.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
+      iframe.onerror = () => {
+        console.error('[overlay] TikTok iframe error', mediaUrl);
+        showStage();
+        scheduleHide(capMs(cfgMs));
+      };
       wrap.appendChild(iframe);
       mediaInner.appendChild(wrap);
       currentMediaEl = iframe;
-      // fallback timer si onload jamais (TikTok parfois lent)
-      setTimeout(() => { if (!stage.classList.contains('show')) { showStage(); scheduleHide(capMs(cfgMs)); } }, 2500);
+      // Safety net : si l'iframe ne fire jamais onload (rare), debloque la queue
+      setTimeout(() => {
+        if (!stage.classList.contains('show')) { showStage(); scheduleHide(capMs(cfgMs)); }
+      }, 4000);
       return;
     }
 
@@ -345,10 +368,13 @@
       wrap.appendChild(playerHost);
       mediaInner.appendChild(wrap);
 
+      // Safety : si rien n'arrive en 10s, on debloque la queue
+      const safety = setTimeout(() => { showStage(); scheduleHide(capMs(cfgMs)); }, 10000);
+
       whenYtApi(() => {
         try {
           const p = new YT.Player(playerId, {
-            videoId: mediaUrl, // ici mediaUrl = videoId (11 chars)
+            videoId: mediaUrl,
             playerVars: {
               autoplay: 1,
               controls: 0,
@@ -361,6 +387,7 @@
             },
             events: {
               onReady: (e) => {
+                clearTimeout(safety);
                 try {
                   e.target.setVolume(currentVolume);
                   if (currentMuted) e.target.mute(); else e.target.unMute();
@@ -371,14 +398,26 @@
                 showStage();
                 scheduleHide(finalMs);
               },
-              onError: () => { showStage(); scheduleHide(capMs(cfgMs)); }
+              onError: () => {
+                clearTimeout(safety);
+                console.error('[overlay] YouTube player error for', mediaUrl);
+                showStage();
+                scheduleHide(capMs(cfgMs));
+              }
             }
           });
           currentMediaEl = p;
-        } catch (_) {
+        } catch (e) {
+          clearTimeout(safety);
+          console.error('[overlay] new YT.Player failed:', e);
           showStage();
           scheduleHide(capMs(cfgMs));
         }
+      }, () => {
+        clearTimeout(safety);
+        console.error('[overlay] YouTube API timeout, fallback');
+        showStage();
+        scheduleHide(capMs(cfgMs));
       });
       return;
     }

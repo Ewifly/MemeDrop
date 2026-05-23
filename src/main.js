@@ -108,7 +108,11 @@ function createOverlayWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Necessaire pour permettre l'embed YouTube/TikTok dans l'overlay
+      // (l'overlay ne charge que des medias publics, pas de risque)
+      webSecurity: false,
+      allowRunningInsecureContent: true
     }
   });
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
