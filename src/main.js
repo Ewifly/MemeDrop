@@ -4,6 +4,9 @@ const fs = require('fs');
 const Store = require('electron-store');
 const WebSocket = require('ws');
 
+// Autoriser autoplay sans gesture utilisateur (necessaire pour YouTube/TikTok dans l'overlay)
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 // =============================================================================
 // CONSTANTES A EDITER AVANT DE BUILD POUR DISTRIBUTION
 // =============================================================================
@@ -111,6 +114,39 @@ function createOverlayWindow() {
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+
+  // YouTube et TikTok envoient X-Frame-Options et CSP qui bloquent
+  // l'embed iframe dans Chromium. On strip ces headers pour ces domaines.
+  overlayWindow.webContents.session.webRequest.onHeadersReceived(
+    {
+      urls: [
+        '*://*.youtube.com/*',
+        '*://*.youtube-nocookie.com/*',
+        '*://*.ytimg.com/*',
+        '*://*.googlevideo.com/*',
+        '*://*.tiktok.com/*',
+        '*://*.tiktokcdn.com/*',
+        '*://*.tiktokv.com/*'
+      ]
+    },
+    (details, callback) => {
+      const responseHeaders = {};
+      for (const key in details.responseHeaders) {
+        const lk = key.toLowerCase();
+        if (lk === 'x-frame-options' ||
+            lk === 'content-security-policy' ||
+            lk === 'content-security-policy-report-only' ||
+            lk === 'cross-origin-embedder-policy' ||
+            lk === 'cross-origin-opener-policy' ||
+            lk === 'cross-origin-resource-policy') {
+          continue;
+        }
+        responseHeaders[key] = details.responseHeaders[key];
+      }
+      callback({ responseHeaders });
+    }
+  );
+
   overlayWindow.loadFile(path.join(__dirname, 'overlay.html'));
 }
 
