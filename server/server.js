@@ -281,18 +281,19 @@ async function handleIncomingMessage(message) {
 
   const urls = extractUrls(text);
   for (const u of urls) {
-    // TikTok : prioriser la resolution MP4 direct via tikwm pour eviter le cookie wall
+    // TikTok : essayer tikwm puis yt-dlp en fallback (les 2 evitent le cookie wall)
     if (TIKTOK_LONG_RE.test(u) || TIKTOK_SHORT_RE.test(u)) {
-      const mp4 = await resolveTikTokDirectMp4(u);
+      let mp4 = await resolveTikTokDirectMp4(u);
+      if (!mp4) {
+        // Fallback yt-dlp (gere mieux le rate limit / videos privees / variants)
+        mp4 = await ytDlpGetUrl(u);
+      }
       if (mp4) {
         broadcastToRoom(room.code, meme({ mediaUrl: mp4, mediaKind: 'video', text: cleanTextFromUrl(text, u) }));
         return;
       }
-      const ttId = TIKTOK_LONG_RE.test(u) ? extractTikTokId(u) : await resolveTikTokShortUrl(u);
-      if (ttId) {
-        broadcastToRoom(room.code, meme({ mediaUrl: ttId, mediaKind: 'tiktok', text: cleanTextFromUrl(text, u) }));
-        return;
-      }
+      // Pas de fallback iframe : cause un cookie wall qu'on peut pas cliquer.
+      // On laisse le flow continuer pour potentiellement chopper la thumbnail via embed Discord.
     }
 
     // Instagram (reel/reels/p) : resolution media direct via yt-dlp
