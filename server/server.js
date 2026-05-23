@@ -116,6 +116,34 @@ async function resolveTikTokDirectMp4(originalUrl) {
   }
 }
 
+const INSTAGRAM_RE = /instagram\.com\/(reel|reels|p)\/([A-Za-z0-9_-]+)/i;
+
+// Resout une URL Instagram (reel/p) vers son media direct (MP4 ou image)
+// via ddinstagram.com qui expose les meta OG sans login.
+async function resolveInstagramMedia(originalUrl) {
+  try {
+    const m = String(originalUrl).match(INSTAGRAM_RE);
+    if (!m) return null;
+    const ddUrl = 'https://ddinstagram.com/' + m[1] + '/' + m[2];
+    const res = await fetch(ddUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; MemeDrop)',
+        'Accept': 'text/html'
+      },
+      redirect: 'follow'
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const videoMatch = html.match(/<meta\s+property=["']og:video["']\s+content=["']([^"']+)["']/i);
+    if (videoMatch) return { url: videoMatch[1].replace(/&amp;/g, '&'), kind: 'video' };
+    const imageMatch = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i);
+    if (imageMatch) return { url: imageMatch[1].replace(/&amp;/g, '&'), kind: 'image' };
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function pickMediaFromUrl(url) {
   const ttId = extractTikTokId(url);
   if (ttId) return { url: ttId, kind: 'tiktok' };
@@ -183,10 +211,18 @@ async function handleIncomingMessage(message) {
         broadcastToRoom(room.code, { type: 'meme', mediaUrl: mp4, mediaKind: 'video', text: cleanTextFromUrl(text, u), author });
         return;
       }
-      // Fallback : iframe TikTok (cookie wall mais on a pas mieux)
       const ttId = TIKTOK_LONG_RE.test(u) ? extractTikTokId(u) : await resolveTikTokShortUrl(u);
       if (ttId) {
         broadcastToRoom(room.code, { type: 'meme', mediaUrl: ttId, mediaKind: 'tiktok', text: cleanTextFromUrl(text, u), author });
+        return;
+      }
+    }
+
+    // Instagram (reel/reels/p) : resolution media direct via ddinstagram
+    if (INSTAGRAM_RE.test(u)) {
+      const ig = await resolveInstagramMedia(u);
+      if (ig) {
+        broadcastToRoom(room.code, { type: 'meme', mediaUrl: ig.url, mediaKind: ig.kind, text: cleanTextFromUrl(text, u), author });
         return;
       }
     }
