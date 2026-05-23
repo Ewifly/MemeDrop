@@ -86,9 +86,31 @@ function extractYouTubeId(url) {
   return m ? m[1] : null;
 }
 
+const TIKTOK_LONG_RE = /tiktok\.com\/(?:@[^/]+\/video\/|v\/)([0-9]+)/i;
+const TIKTOK_SHORT_RE = /(?:vm|vt)\.tiktok\.com\/([A-Za-z0-9]+)/i;
+
+function extractTikTokId(url) {
+  if (!url) return null;
+  const m = String(url).match(TIKTOK_LONG_RE);
+  return m ? m[1] : null;
+}
+
+// Resout les short URLs tiktok (vm.tiktok.com / vt.tiktok.com) vers leur URL longue
+// pour en extraire le video ID. Retourne null si echec.
+async function resolveTikTokShortUrl(shortUrl) {
+  try {
+    const res = await fetch(shortUrl, { method: 'HEAD', redirect: 'follow' });
+    return extractTikTokId(res.url);
+  } catch (_) {
+    return null;
+  }
+}
+
 function pickMediaFromUrl(url) {
   const ytId = extractYouTubeId(url);
   if (ytId) return { url: ytId, kind: 'youtube' };
+  const ttId = extractTikTokId(url);
+  if (ttId) return { url: ttId, kind: 'tiktok' };
   const cleaned = url.split('?')[0].split('#')[0];
   if (MEDIA_RE.image.test(cleaned)) return { url, kind: 'image' };
   if (MEDIA_RE.video.test(cleaned)) return { url, kind: 'video' };
@@ -101,6 +123,16 @@ function pickMediaFromEmbeds(embeds) {
   for (const e of embeds) {
     const ytId = extractYouTubeId(e.url) || extractYouTubeId(e.video?.url);
     if (ytId) return { url: ytId, kind: 'youtube' };
+    const ttId = extractTikTokId(e.url) || extractTikTokId(e.video?.url);
+    if (ttId) {
+      // Si Discord a un MP4 direct dans embed.video.url, prefer le (lecture HTML5)
+      const vidUrl = e.video?.url;
+      if (vidUrl) {
+        const c = vidUrl.split('?')[0];
+        if (MEDIA_RE.video.test(c)) return { url: vidUrl, kind: 'video' };
+      }
+      return { url: ttId, kind: 'tiktok' };
+    }
     const vidUrl = e.video?.url;
     if (vidUrl) {
       const c = vidUrl.split('?')[0];
@@ -120,7 +152,7 @@ function cleanTextFromUrl(text, url) {
   return text.replace(url, '').replace(/\s+/g, ' ').trim();
 }
 
-function handleIncomingMessage(message) {
+async function handleIncomingMessage(message) {
   const room = findRoomByChannelId(message.channelId);
   if (!room) return; // ce channel n'est pas mappe a une room
 
@@ -138,6 +170,13 @@ function handleIncomingMessage(message) {
     if (m) {
       broadcastToRoom(room.code, { type: 'meme', mediaUrl: m.url, mediaKind: m.kind, text: cleanTextFromUrl(text, u) });
       return;
+    }
+    if (TIKTOK_SHORT_RE.test(u)) {
+      const ttId = await resolveTikTokShortUrl(u);
+      if (ttId) {
+        broadcastToRoom(room.code, { type: 'meme', mediaUrl: ttId, mediaKind: 'tiktok', text: cleanTextFromUrl(text, u) });
+        return;
+      }
     }
   }
 
