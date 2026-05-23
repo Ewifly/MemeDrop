@@ -78,7 +78,17 @@ function pickMediaFromAttachments(attachments) {
   return null;
 }
 
+const YOUTUBE_RE = /(?:youtube\.com\/watch\?[^\s]*v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/i;
+
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const m = String(url).match(YOUTUBE_RE);
+  return m ? m[1] : null;
+}
+
 function pickMediaFromUrl(url) {
+  const ytId = extractYouTubeId(url);
+  if (ytId) return { url: ytId, kind: 'youtube' };
   const cleaned = url.split('?')[0].split('#')[0];
   if (MEDIA_RE.image.test(cleaned)) return { url, kind: 'image' };
   if (MEDIA_RE.video.test(cleaned)) return { url, kind: 'video' };
@@ -89,6 +99,8 @@ function pickMediaFromUrl(url) {
 function pickMediaFromEmbeds(embeds) {
   if (!embeds || !embeds.length) return null;
   for (const e of embeds) {
+    const ytId = extractYouTubeId(e.url) || extractYouTubeId(e.video?.url);
+    if (ytId) return { url: ytId, kind: 'youtube' };
     const vidUrl = e.video?.url;
     if (vidUrl) {
       const c = vidUrl.split('?')[0];

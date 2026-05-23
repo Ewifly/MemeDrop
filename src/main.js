@@ -1,5 +1,6 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, shell, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const Store = require('electron-store');
 const WebSocket = require('ws');
 
@@ -22,16 +23,30 @@ const store = new Store({
     userCode: '',
     overlayDurationMs: 8000,
     overlayPosition: 'bottom-right',
-    autoLaunch: true
+    autoLaunch: true,
+    volume: 80,        // 0-100
+    muted: false,
+    disabled: false,
+    closeBehavior: 'ask' // 'ask' | 'quit' | 'minimize'
   }
 });
 
-const iconPath = path.join(__dirname, '..', 'assets', 'icon.png');
+function resolveIconPath() {
+  const assetsDir = path.join(__dirname, '..', 'assets');
+  for (const name of ['icon.png', 'icon.jpg', 'icon.jpeg', 'icon.ico']) {
+    const p = path.join(assetsDir, name);
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(assetsDir, 'icon.png');
+}
+
+const iconPath = resolveIconPath();
 
 let tray = null;
 let welcomeWindow = null;
 let adminWindow = null;
 let overlayWindow = null;
+let trayPopupWindow = null;
 let ws = null;
 let wsReconnectTimer = null;
 let wsState = 'idle';
@@ -41,7 +56,7 @@ let wsState = 'idle';
 function getTrayIcon() {
   try {
     const img = nativeImage.createFromPath(iconPath);
-    if (!img.isEmpty()) return img.resize({ width: 16, height: 16 });
+    if (!img.isEmpty()) return img.resize({ width: 20, height: 20 });
   } catch (_) {}
   return nativeImage.createEmpty();
 }
@@ -114,16 +129,21 @@ function positionOverlay(position) {
 }
 
 function showMeme({ mediaUrl, mediaKind, text }) {
+  if (store.get('disabled')) return; // user a coupe la reception
   if (!overlayWindow) createOverlayWindow();
   positionOverlay(store.get('overlayPosition'));
   const duration = store.get('overlayDurationMs');
+  const muted = !!store.get('muted');
+  const volume = Math.max(0, Math.min(100, Number(store.get('volume')) || 0));
 
   const send = () => {
     overlayWindow.webContents.send('meme:show', {
       mediaUrl: mediaUrl || null,
       mediaKind: mediaKind || null,
       text: text || '',
-      duration
+      duration,
+      volume,
+      muted
     });
     overlayWindow.showInactive();
   };
@@ -249,7 +269,11 @@ async function adminFetch(pathname, options = {}) {
 // --- Windows ---
 
 function createWelcomeWindow() {
-  if (welcomeWindow) { welcomeWindow.focus(); return; }
+  if (welcomeWindow && !welcomeWindow.isDestroyed()) {
+    if (!welcomeWindow.isVisible()) welcomeWindow.show();
+    welcomeWindow.focus();
+    return;
+  }
   welcomeWindow = new BrowserWindow({
     width: 520,
     height: 460,
@@ -264,11 +288,16 @@ function createWelcomeWindow() {
   });
   welcomeWindow.setMenu(null);
   welcomeWindow.loadFile(path.join(__dirname, 'welcome.html'));
+  // Welcome = ecran d'onboarding : on ne demande pas "que faire au close"
   welcomeWindow.on('closed', () => { welcomeWindow = null; });
 }
 
 function createAdminWindow() {
-  if (adminWindow) { adminWindow.focus(); return; }
+  if (adminWindow && !adminWindow.isDestroyed()) {
+    if (!adminWindow.isVisible()) adminWindow.show();
+    adminWindow.focus();
+    return;
+  }
   adminWindow = new BrowserWindow({
     width: 620,
     height: 820,
@@ -283,7 +312,101 @@ function createAdminWindow() {
   });
   adminWindow.setMenu(null);
   adminWindow.loadFile(path.join(__dirname, 'admin.html'));
+  attachCloseBehavior(adminWindow);
   adminWindow.on('closed', () => { adminWindow = null; });
+}
+
+function attachCloseBehavior(win) {
+  win.on('close', (e) => {
+    if (app.isQuiting) return;
+    const behavior = store.get('closeBehavior');
+    if (behavior === 'quit') {
+      app.isQuiting = true;
+      return; // laisse fermer, then before-quit fait le ménage
+    }
+    if (behavior === 'minimize') {
+      e.preventDefault();
+      win.hide();
+      return;
+    }
+    // 'ask' - dialog async pour avoir la checkbox state
+    e.preventDefault();
+    dialog.showMessageBox(win, {
+      type: 'question',
+      buttons: ['Garder dans le tray', 'Quitter MemeDrop', 'Annuler'],
+      defaultId: 0,
+      cancelId: 2,
+      title: 'MemeDrop',
+      message: 'Que veux-tu faire ?',
+      detail: "Tu peux soit minimiser MemeDrop dans le tray (l'app continue d'ecouter), soit le quitter completement.",
+      checkboxLabel: 'Ne plus demander',
+      checkboxChecked: false
+    }).then((result) => {
+      if (result.response === 2) return; // annule
+      const chosen = result.response === 0 ? 'minimize' : 'quit';
+      if (result.checkboxChecked) store.set('closeBehavior', chosen);
+      if (chosen === 'minimize') {
+        win.hide();
+      } else {
+        app.isQuiting = true;
+        app.quit();
+      }
+    }).catch(() => {});
+  });
+}
+
+function createTrayPopupWindow() {
+  if (trayPopupWindow) return;
+  trayPopupWindow = new BrowserWindow({
+    width: 280,
+    height: 240,
+    frame: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    transparent: false,
+    movable: false,
+    fullscreenable: false,
+    icon: iconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  trayPopupWindow.setMenu(null);
+  trayPopupWindow.loadFile(path.join(__dirname, 'tray-popup.html'));
+  trayPopupWindow.on('blur', () => {
+    if (trayPopupWindow && trayPopupWindow.isVisible()) trayPopupWindow.hide();
+  });
+}
+
+function positionTrayPopup() {
+  if (!trayPopupWindow || !tray) return;
+  const bounds = tray.getBounds();
+  const [w, h] = trayPopupWindow.getSize();
+  const primary = screen.getPrimaryDisplay();
+  const sw = primary.workAreaSize.width;
+  const sh = primary.workAreaSize.height;
+  let x = Math.round(bounds.x + bounds.width / 2 - w / 2);
+  let y = bounds.y - h - 8;
+  if (y < 0) y = bounds.y + bounds.height + 8;
+  if (x + w > sw) x = sw - w - 4;
+  if (x < 4) x = 4;
+  if (y + h > sh) y = sh - h - 4;
+  trayPopupWindow.setPosition(x, y);
+}
+
+function toggleTrayPopup() {
+  if (!trayPopupWindow) createTrayPopupWindow();
+  if (trayPopupWindow.isVisible()) {
+    trayPopupWindow.hide();
+    return;
+  }
+  positionTrayPopup();
+  trayPopupWindow.show();
+  trayPopupWindow.focus();
 }
 
 // --- Tray ---
@@ -294,14 +417,24 @@ function buildTrayMenu() {
     { label: `MemeDrop (${mode || 'non configure'})`, enabled: false },
     { type: 'separator' },
     {
+      label: 'Ouvrir l\'app',
+      click: () => openApp()
+    },
+    {
+      label: 'Recevoir les memes',
+      type: 'checkbox',
+      checked: !store.get('disabled'),
+      click: (item) => {
+        store.set('disabled', !item.checked);
+        notifyPopupState();
+      }
+    },
+    {
       label: 'Test overlay (local)',
       click: () => showMeme({ text: 'Test MemeDrop !', mediaUrl: null, mediaKind: null })
     }
   ];
 
-  if (mode === 'admin') {
-    items.push({ label: 'Panneau admin', click: () => createAdminWindow() });
-  }
   if (mode === 'user') {
     items.push({
       label: `Code salon: ${store.get('userCode') || '-'}`,
@@ -322,6 +455,29 @@ function buildTrayMenu() {
       }
     },
     {
+      label: 'Comportement a la fermeture',
+      submenu: [
+        {
+          label: 'Demander a chaque fois',
+          type: 'radio',
+          checked: store.get('closeBehavior') === 'ask',
+          click: () => store.set('closeBehavior', 'ask')
+        },
+        {
+          label: 'Minimiser dans le tray',
+          type: 'radio',
+          checked: store.get('closeBehavior') === 'minimize',
+          click: () => store.set('closeBehavior', 'minimize')
+        },
+        {
+          label: 'Quitter completement',
+          type: 'radio',
+          checked: store.get('closeBehavior') === 'quit',
+          click: () => store.set('closeBehavior', 'quit')
+        }
+      ]
+    },
+    {
       label: 'Changer de mode',
       click: () => goBackToWelcome()
     },
@@ -329,6 +485,24 @@ function buildTrayMenu() {
     { label: 'Quitter', click: () => { app.isQuiting = true; app.quit(); } }
   );
   return Menu.buildFromTemplate(items);
+}
+
+function openApp() {
+  const mode = store.get('mode');
+  if (mode === 'admin') createAdminWindow();
+  else createWelcomeWindow();
+  if (trayPopupWindow && trayPopupWindow.isVisible()) trayPopupWindow.hide();
+}
+
+function notifyPopupState() {
+  if (trayPopupWindow && !trayPopupWindow.isDestroyed()) {
+    trayPopupWindow.webContents.send('popup:state', {
+      volume: store.get('volume'),
+      muted: store.get('muted'),
+      disabled: store.get('disabled')
+    });
+  }
+  if (tray) tray.setContextMenu(buildTrayMenu());
 }
 
 function goBackToWelcome() {
@@ -343,11 +517,8 @@ function createTray() {
   tray = new Tray(getTrayIcon());
   tray.setToolTip('MemeDrop');
   tray.setContextMenu(buildTrayMenu());
-  tray.on('double-click', () => {
-    const mode = store.get('mode');
-    if (mode === 'admin') createAdminWindow();
-    else if (!mode) createWelcomeWindow();
-  });
+  tray.on('click', () => toggleTrayPopup());
+  tray.on('double-click', () => openApp());
 }
 
 // --- IPC ---
@@ -438,6 +609,52 @@ ipcMain.handle('common:open-link', (_e, url) => {
 
 ipcMain.handle('common:back-to-welcome', () => {
   goBackToWelcome();
+  return true;
+});
+
+// Tray popup
+ipcMain.handle('popup:get-state', () => ({
+  volume: store.get('volume'),
+  muted: store.get('muted'),
+  disabled: store.get('disabled')
+}));
+
+function notifyOverlayAudio() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send('overlay:audio', {
+      volume: store.get('volume'),
+      muted: !!store.get('muted')
+    });
+  }
+}
+
+ipcMain.handle('popup:set-volume', (_e, v) => {
+  const vol = Math.max(0, Math.min(100, Number(v) || 0));
+  store.set('volume', vol);
+  notifyOverlayAudio();
+  return vol;
+});
+
+ipcMain.handle('popup:set-muted', (_e, m) => {
+  store.set('muted', !!m);
+  if (tray) tray.setContextMenu(buildTrayMenu());
+  notifyOverlayAudio();
+  return !!m;
+});
+
+ipcMain.handle('popup:set-disabled', (_e, d) => {
+  store.set('disabled', !!d);
+  if (tray) tray.setContextMenu(buildTrayMenu());
+  return !!d;
+});
+
+ipcMain.handle('popup:open-app', () => {
+  openApp();
+  return true;
+});
+
+ipcMain.handle('popup:hide', () => {
+  if (trayPopupWindow) trayPopupWindow.hide();
   return true;
 });
 

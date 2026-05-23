@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('memedrop', {
   // Overlay
   onMeme: (cb) => ipcRenderer.on('meme:show', (_e, data) => cb(data)),
+  onAudioChange: (cb) => ipcRenderer.on('overlay:audio', (_e, data) => cb(data)),
 
   // Welcome screen
   chooseUser: (code) => ipcRenderer.invoke('welcome:choose-user', code),
@@ -21,5 +22,14 @@ contextBridge.exposeInMainWorld('memedrop', {
 
   // Common
   openLink: (url) => ipcRenderer.invoke('common:open-link', url),
-  backToWelcome: () => ipcRenderer.invoke('common:back-to-welcome')
+  backToWelcome: () => ipcRenderer.invoke('common:back-to-welcome'),
+
+  // Tray popup
+  popupGetState: () => ipcRenderer.invoke('popup:get-state'),
+  popupSetVolume: (v) => ipcRenderer.invoke('popup:set-volume', v),
+  popupSetMuted: (m) => ipcRenderer.invoke('popup:set-muted', m),
+  popupSetDisabled: (d) => ipcRenderer.invoke('popup:set-disabled', d),
+  popupOpenApp: () => ipcRenderer.invoke('popup:open-app'),
+  popupHide: () => ipcRenderer.invoke('popup:hide'),
+  onPopupState: (cb) => ipcRenderer.on('popup:state', (_e, data) => cb(data))
 });

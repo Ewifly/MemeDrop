@@ -35,18 +35,60 @@
     max-width: 100%;
     max-height: 100%;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     justify-content: center;
   }
 
-  #media-wrap img,
-  #media-wrap video {
+  #media-inner {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+  }
+
+  #media-inner img,
+  #media-inner video {
     max-width: 100%;
     max-height: 100%;
     display: block;
     border-radius: 10px;
     filter: drop-shadow(0 12px 28px rgba(0,0,0,0.55));
   }
+
+  .yt-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.55);
+  }
+  .yt-wrap iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+
+  #progress {
+    margin-top: 6px;
+    height: 3px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 2px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+  #progress-fill {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #5865F2, #eb459e);
+    transform-origin: left center;
+  }
+  #stage.text-only #progress { display: none; }
 
   #text {
     position: absolute;
@@ -78,32 +120,97 @@
 </head>
 <body>
   <div id="stage">
-    <div id="media-wrap"></div>
+    <div id="media-wrap">
+      <div id="media-inner"></div>
+      <div id="progress"><div id="progress-fill"></div></div>
+    </div>
     <div id="text"></div>
   </div>
 
 <script>
   const stage = document.getElementById('stage');
   const mediaWrap = document.getElementById('media-wrap');
+  const mediaInner = document.getElementById('media-inner');
   const textEl = document.getElementById('text');
+  const progressFill = document.getElementById('progress-fill');
+
+  const MAX_DURATION_MS = 60000; // 1 minute max
 
   let hideTimer = null;
   let queue = [];
   let playing = false;
   let currentMediaEl = null;
+  let currentMediaKind = null; // 'image' | 'video' | 'audio' | 'youtube'
+  let currentVolume = 80;
+  let currentMuted = false;
+
+  // Load YouTube IFrame API
+  let ytApiReady = false;
+  let ytReadyQueue = [];
+  window.onYouTubeIframeAPIReady = () => {
+    ytApiReady = true;
+    ytReadyQueue.forEach((cb) => { try { cb(); } catch (_) {} });
+    ytReadyQueue = [];
+  };
+  (function loadYT() {
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  })();
+  function whenYtApi(cb) {
+    if (ytApiReady) cb();
+    else ytReadyQueue.push(cb);
+  }
+
+  function applyVolumeToMedia(volume, muted) {
+    if (!currentMediaEl) return;
+    try {
+      if (currentMediaKind === 'youtube') {
+        if (typeof currentMediaEl.setVolume === 'function') currentMediaEl.setVolume(volume);
+        if (muted && typeof currentMediaEl.mute === 'function') currentMediaEl.mute();
+        if (!muted && typeof currentMediaEl.unMute === 'function') currentMediaEl.unMute();
+      } else if (currentMediaKind === 'video' || currentMediaKind === 'audio') {
+        currentMediaEl.volume = volume / 100;
+        currentMediaEl.muted = muted;
+      }
+    } catch (_) {}
+  }
+
+  function pauseCurrentMedia() {
+    if (!currentMediaEl) return;
+    try {
+      if (currentMediaKind === 'youtube') {
+        if (typeof currentMediaEl.stopVideo === 'function') currentMediaEl.stopVideo();
+        if (typeof currentMediaEl.destroy === 'function') currentMediaEl.destroy();
+      } else if (typeof currentMediaEl.pause === 'function') {
+        currentMediaEl.pause();
+      }
+    } catch (_) {}
+  }
 
   function clearStage() {
-    mediaWrap.innerHTML = '';
+    pauseCurrentMedia();
+    currentMediaEl = null;
+    currentMediaKind = null;
+    mediaInner.innerHTML = '';
     textEl.textContent = '';
     stage.classList.remove('text-only', 'show', 'hide');
-    if (currentMediaEl) {
-      try { currentMediaEl.pause && currentMediaEl.pause(); } catch (_) {}
-      currentMediaEl = null;
-    }
+    progressFill.style.transition = 'none';
+    progressFill.style.transform = 'scaleX(1)';
+  }
+
+  function startProgress(durationMs) {
+    progressFill.style.transition = 'none';
+    progressFill.style.transform = 'scaleX(1)';
+    // force reflow pour que la transition demarre proprement
+    void progressFill.offsetWidth;
+    progressFill.style.transition = `transform ${durationMs}ms linear`;
+    progressFill.style.transform = 'scaleX(0)';
   }
 
   function scheduleHide(durationMs) {
     if (hideTimer) clearTimeout(hideTimer);
+    startProgress(durationMs);
     hideTimer = setTimeout(() => {
       stage.classList.remove('show');
       stage.classList.add('hide');
@@ -121,69 +228,128 @@
     });
   }
 
-  function render({ mediaUrl, mediaKind, text, duration }) {
+  function capMs(ms) {
+    return Math.min(MAX_DURATION_MS, Math.max(2000, ms));
+  }
+
+  function render({ mediaUrl, mediaKind, text, duration, volume, muted }) {
     clearStage();
     textEl.textContent = text || '';
 
     const cfgMs = Math.max(2000, Number(duration) || 8000);
+    currentVolume = Math.max(0, Math.min(100, Number(volume ?? 80)));
+    currentMuted = !!muted;
+    const vol = currentVolume / 100;
 
     if (!mediaUrl) {
       stage.classList.add('text-only');
       showStage();
-      scheduleHide(cfgMs);
+      scheduleHide(capMs(cfgMs));
       return;
     }
 
     if (mediaKind === 'image') {
+      currentMediaKind = 'image';
       const img = new Image();
-      img.onload = () => { showStage(); scheduleHide(cfgMs); };
-      img.onerror = () => { showStage(); scheduleHide(cfgMs); };
+      img.onload = () => { showStage(); scheduleHide(capMs(cfgMs)); };
+      img.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
       img.src = mediaUrl;
-      mediaWrap.appendChild(img);
+      mediaInner.appendChild(img);
       currentMediaEl = img;
       return;
     }
 
     if (mediaKind === 'video') {
+      currentMediaKind = 'video';
       const v = document.createElement('video');
       v.src = mediaUrl;
       v.autoplay = true;
-      v.muted = false;
+      v.muted = currentMuted;
+      v.volume = vol;
       v.playsInline = true;
       v.controls = false;
       v.onloadedmetadata = () => {
         const mediaMs = (v.duration && isFinite(v.duration)) ? v.duration * 1000 : cfgMs;
         showStage();
-        scheduleHide(Math.max(mediaMs, cfgMs));
+        scheduleHide(capMs(Math.max(mediaMs, cfgMs)));
       };
-      v.onerror = () => { showStage(); scheduleHide(cfgMs); };
-      mediaWrap.appendChild(v);
+      v.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
+      mediaInner.appendChild(v);
       currentMediaEl = v;
-      // Autoplay sometimes needs explicit play() in Electron
       v.play().catch(() => {});
       return;
     }
 
     if (mediaKind === 'audio') {
-      // Pas de visuel pour l'audio : on traite comme text-only mais on joue le son
+      currentMediaKind = 'audio';
       stage.classList.add('text-only');
       const a = new Audio(mediaUrl);
       a.autoplay = true;
+      a.muted = currentMuted;
+      a.volume = vol;
       a.onloadedmetadata = () => {
         const mediaMs = (a.duration && isFinite(a.duration)) ? a.duration * 1000 : cfgMs;
         showStage();
-        scheduleHide(Math.max(mediaMs, cfgMs));
+        scheduleHide(capMs(Math.max(mediaMs, cfgMs)));
       };
-      a.onerror = () => { showStage(); scheduleHide(cfgMs); };
+      a.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
       a.play().catch(() => {});
       currentMediaEl = a;
+      return;
+    }
+
+    if (mediaKind === 'youtube') {
+      currentMediaKind = 'youtube';
+      const wrap = document.createElement('div');
+      wrap.className = 'yt-wrap';
+      const playerHost = document.createElement('div');
+      const playerId = 'yt-player-' + Date.now();
+      playerHost.id = playerId;
+      wrap.appendChild(playerHost);
+      mediaInner.appendChild(wrap);
+
+      whenYtApi(() => {
+        try {
+          const p = new YT.Player(playerId, {
+            videoId: mediaUrl, // ici mediaUrl = videoId (11 chars)
+            playerVars: {
+              autoplay: 1,
+              controls: 0,
+              modestbranding: 1,
+              rel: 0,
+              fs: 0,
+              disablekb: 1,
+              playsinline: 1,
+              iv_load_policy: 3
+            },
+            events: {
+              onReady: (e) => {
+                try {
+                  e.target.setVolume(currentVolume);
+                  if (currentMuted) e.target.mute(); else e.target.unMute();
+                  e.target.playVideo();
+                } catch (_) {}
+                const dur = (typeof e.target.getDuration === 'function') ? e.target.getDuration() * 1000 : 0;
+                const finalMs = capMs(Math.max(cfgMs, dur || cfgMs));
+                showStage();
+                scheduleHide(finalMs);
+              },
+              onError: () => { showStage(); scheduleHide(capMs(cfgMs)); }
+            }
+          });
+          currentMediaEl = p;
+        } catch (_) {
+          showStage();
+          scheduleHide(capMs(cfgMs));
+        }
+      });
       return;
     }
 
     // Fallback : type inconnu, juste texte
     stage.classList.add('text-only');
     showStage();
-    scheduleHide(cfgMs);
+    scheduleHide(capMs(cfgMs));
   }
 
   function next() {
@@ -193,6 +359,12 @@
     playing = true;
     render(item);
   }
+
+  window.memedrop.onAudioChange(({ volume, muted }) => {
+    currentVolume = Math.max(0, Math.min(100, Number(volume) || 0));
+    currentMuted = !!muted;
+    applyVolumeToMedia(currentVolume, currentMuted);
+  });
 
   window.memedrop.onMeme((data) => {
     queue.push(data);
