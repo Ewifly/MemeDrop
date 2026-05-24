@@ -70,7 +70,7 @@
     padding: 0 4px;
   }
   #author.hidden { display: none; }
-  #author img {
+  #author img.avatar {
     width: 38px;
     height: 38px;
     border-radius: 50%;
@@ -87,6 +87,35 @@
     paint-order: stroke fill;
     text-shadow: 0 2px 4px rgba(0,0,0,0.6);
     word-break: break-word;
+  }
+  #author .source {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    padding: 3px 8px;
+    background: rgba(0,0,0,0.55);
+    border-radius: 999px;
+    flex-shrink: 0;
+    max-width: 45%;
+  }
+  #author .source.hidden { display: none; }
+  #author .source img {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #2a2c3c;
+    flex-shrink: 0;
+  }
+  #author .source span {
+    font-size: 11px;
+    color: #e6e6f0;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 110px;
   }
 
   .tt-wrap {
@@ -160,8 +189,12 @@
   <div id="stage">
     <div id="media-wrap">
       <div id="author" class="hidden">
-        <img id="author-avatar" alt="" />
+        <img id="author-avatar" class="avatar" alt="" />
         <div class="author-name" id="author-name"></div>
+        <div class="source hidden" id="source">
+          <img id="source-icon" alt="" />
+          <span id="source-name"></span>
+        </div>
       </div>
       <div id="media-inner"></div>
       <div id="text"></div>
@@ -176,6 +209,9 @@
   const authorEl = document.getElementById('author');
   const authorAvatarEl = document.getElementById('author-avatar');
   const authorNameEl = document.getElementById('author-name');
+  const sourceEl = document.getElementById('source');
+  const sourceIconEl = document.getElementById('source-icon');
+  const sourceNameEl = document.getElementById('source-name');
 
   const MAX_DURATION_MS = 60000; // 1 minute max
 
@@ -215,10 +251,13 @@
     authorEl.classList.add('hidden');
     authorAvatarEl.removeAttribute('src');
     authorNameEl.textContent = '';
+    sourceEl.classList.add('hidden');
+    sourceIconEl.removeAttribute('src');
+    sourceNameEl.textContent = '';
     stage.classList.remove('text-only', 'show', 'hide');
   }
 
-  function renderAuthor(author) {
+  function renderAuthor(author, source) {
     if (!author || !author.name) {
       authorEl.classList.add('hidden');
       return;
@@ -228,6 +267,21 @@
       authorAvatarEl.src = author.avatarUrl;
     } else {
       authorAvatarEl.removeAttribute('src');
+    }
+    // Source : guild icon + nom, ou juste roomName en fallback
+    if (source && (source.guildName || source.roomName)) {
+      const label = source.guildName || source.roomName || '';
+      sourceNameEl.textContent = label;
+      if (source.guildIcon) {
+        sourceIconEl.src = source.guildIcon;
+        sourceIconEl.style.display = '';
+      } else {
+        sourceIconEl.removeAttribute('src');
+        sourceIconEl.style.display = 'none';
+      }
+      sourceEl.classList.remove('hidden');
+    } else {
+      sourceEl.classList.add('hidden');
     }
     authorEl.classList.remove('hidden');
   }
@@ -255,10 +309,10 @@
     return Math.min(MAX_DURATION_MS, Math.max(2000, ms));
   }
 
-  function render({ mediaUrl, mediaKind, text, author, duration, forceDuration, volume, muted }) {
+  function render({ mediaUrl, mediaKind, text, author, source, duration, forceDuration, volume, muted }) {
     clearStage();
     textEl.textContent = text || '';
-    renderAuthor(author);
+    renderAuthor(author, source);
 
     const cfgMs = Math.max(2000, Number(duration) || 8000);
     const force = !!forceDuration;

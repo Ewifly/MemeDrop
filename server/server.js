@@ -322,6 +322,14 @@ async function handleIncomingMessage(message) {
     name: message.member?.displayName || message.author.globalName || message.author.username,
     avatarUrl: message.author.displayAvatarURL({ size: 128, extension: 'png' })
   };
+  // Source = provenance Discord : nom du serveur + icone du serveur (guild)
+  // Fallback sur le nom de la room MemeDrop si pas d'info guild.
+  const source = {
+    guildName: message.guild?.name || null,
+    guildIcon: message.guild?.iconURL?.({ size: 128, extension: 'png' }) || null,
+    roomName: room.name || null,
+    roomCode: room.code
+  };
 
   // helper pour construire le payload meme avec la duration custom propagee
   // forceDuration: true indique au client d'utiliser duration tel quel
@@ -329,6 +337,7 @@ async function handleIncomingMessage(message) {
   const meme = (extra) => ({
     type: 'meme',
     author,
+    source,
     duration: customDuration,
     forceDuration: customDuration != null,
     ...extra

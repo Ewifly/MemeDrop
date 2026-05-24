@@ -298,6 +298,35 @@
     font-style: italic;
   }
 
+  /* Banniere update */
+  .update-banner {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    background: linear-gradient(90deg, rgba(88,101,242,0.15), rgba(235,69,158,0.15));
+    border: 1px solid #5865F2;
+    border-radius: 10px;
+  }
+  .update-banner.visible { display: flex; }
+  .update-banner .info { flex: 1; font-size: 13px; }
+  .update-banner .info strong { color: #fff; }
+  .update-banner .info .small { font-size: 11px; color: #b9bccd; margin-top: 2px; }
+  .update-banner button {
+    background: #5865F2;
+    color: #fff;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 7px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  .update-banner button:hover { background: #4752c4; }
+  .update-banner button:disabled { opacity: 0.6; cursor: not-allowed; }
+
   /* Bouton quit */
   .footer {
     margin-top: 8px;
@@ -323,6 +352,14 @@
     <h1>MemeDrop</h1>
   </div>
   <div class="sub">Tu recois les memes de ton salon en temps reel.</div>
+
+  <div class="update-banner" id="updateBanner">
+    <div class="info">
+      <strong>📦 Mise a jour disponible</strong>
+      <div class="small" id="updateLabel"></div>
+    </div>
+    <button id="btnUpdate">Telecharger</button>
+  </div>
 
   <div class="section">
     <h2>Salons connectes</h2>
@@ -566,6 +603,44 @@
   }
   $('btnAddCode').addEventListener('click', addCode);
   $('newCodeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addCode(); });
+
+  // Update banner
+  function renderUpdate(u) {
+    if (!u || !u.available) {
+      $('updateBanner').classList.remove('visible');
+      return;
+    }
+    $('updateBanner').classList.add('visible');
+    const btn = $('btnUpdate');
+    if (u.state === 'downloading') {
+      $('updateLabel').textContent = 'Telechargement de ' + (u.name || ('v' + u.version)) + '...';
+      btn.disabled = true;
+      btn.textContent = 'Telechargement...';
+    } else if (u.state === 'ready') {
+      $('updateLabel').textContent = 'Installeur lance, l\'app va se fermer.';
+      btn.disabled = true;
+      btn.textContent = 'En cours...';
+    } else if (u.state === 'error') {
+      $('updateLabel').textContent = 'Erreur de telechargement. Reessaye.';
+      btn.disabled = false;
+      btn.textContent = 'Reessayer';
+    } else {
+      $('updateLabel').textContent = (u.name || ('v' + u.version)) + ' - clique pour installer';
+      btn.disabled = false;
+      btn.textContent = 'Telecharger';
+    }
+  }
+
+  $('btnUpdate').addEventListener('click', async () => {
+    await window.memedrop.downloadUpdate();
+  });
+
+  async function loadUpdate() {
+    const u = await window.memedrop.getUpdate();
+    renderUpdate(u);
+  }
+  window.memedrop.onUpdateStatus((u) => renderUpdate(u));
+  loadUpdate();
 
   $('btnBack').addEventListener('click', () => window.memedrop.backToWelcome());
   $('btnQuit').addEventListener('click', () => window.memedrop.quitApp());

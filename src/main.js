@@ -16,6 +16,10 @@ const DEFAULT_SERVER_URL = 'ws://57.131.40.94:8787';
 // Mot de passe en dur qui protege l'acces au panneau admin de l'app cliente.
 // Change-le avant de distribuer le .exe a tes amis.
 const APP_ADMIN_PASSWORD = 'TonMdpAdmin';
+
+// Repo GitHub (owner/repo) public qui heberge les .exe releases pour l'auto-update.
+const UPDATE_REPO = 'LCournollet/memedrop-releases';
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
 // =============================================================================
 
 const store = new Store({
@@ -49,6 +53,88 @@ const store = new Store({
 let serverBotStatus = null;
 // roomName par code (recu via WS hello)
 let roomNameByCode = {};
+
+// Info de mise a jour : { version, name, downloadUrl } | null
+let updateInfo = null;
+let updateDownloadState = 'idle'; // 'idle' | 'downloading' | 'ready' | 'error'
+
+function compareSemver(a, b) {
+  const pa = String(a).split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b).split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch('https://api.github.com/repos/' + UPDATE_REPO + '/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'MemeDrop-Updater' }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const latest = (data.tag_name || '').replace(/^v/i, '').trim();
+    const current = app.getVersion();
+    if (!latest) return;
+    if (compareSemver(latest, current) <= 0) {
+      // Pas de nouvelle version
+      if (updateInfo) {
+        updateInfo = null;
+        notifyAllUpdate();
+      }
+      return;
+    }
+    const exeAsset = (data.assets || []).find((a) => /\.exe$/i.test(a.name));
+    if (!exeAsset) return;
+    updateInfo = {
+      version: latest,
+      name: data.name || ('MemeDrop v' + latest),
+      downloadUrl: exeAsset.browser_download_url
+    };
+    notifyAllUpdate();
+  } catch (_) { /* offline ou GitHub down */ }
+}
+
+function notifyAllUpdate() {
+  const payload = {
+    available: !!updateInfo,
+    version: updateInfo?.version || null,
+    name: updateInfo?.name || null,
+    state: updateDownloadState
+  };
+  if (userWindow && !userWindow.isDestroyed()) {
+    userWindow.webContents.send('update:status', payload);
+  }
+  if (adminWindow && !adminWindow.isDestroyed()) {
+    adminWindow.webContents.send('update:status', payload);
+  }
+}
+
+async function downloadAndLaunchUpdate() {
+  if (!updateInfo || !updateInfo.downloadUrl) return { ok: false, error: 'no_update' };
+  updateDownloadState = 'downloading';
+  notifyAllUpdate();
+  try {
+    const dest = path.join(app.getPath('temp'), 'MemeDrop-Setup-' + updateInfo.version + '.exe');
+    const res = await fetch(updateInfo.downloadUrl, { redirect: 'follow' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const buf = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(dest, buf);
+    updateDownloadState = 'ready';
+    notifyAllUpdate();
+    // Lance l'installeur puis quitte l'app pour qu'il puisse remplacer les fichiers
+    await shell.openPath(dest);
+    setTimeout(() => { app.isQuiting = true; app.quit(); }, 800);
+    return { ok: true };
+  } catch (e) {
+    updateDownloadState = 'error';
+    notifyAllUpdate();
+    return { ok: false, error: e.message };
+  }
+}
 
 function resolveIconPath() {
   const assetsDir = path.join(__dirname, '..', 'assets');
@@ -192,7 +278,7 @@ function positionOverlay(position) {
   overlayWindow.setPosition(x, y);
 }
 
-function showMeme({ mediaUrl, mediaKind, text, author, customDuration, forceDuration }) {
+function showMeme({ mediaUrl, mediaKind, text, author, source, customDuration, forceDuration }) {
   if (store.get('disabled')) return; // user a coupe la reception
   if (!overlayWindow) createOverlayWindow();
   positionOverlay(store.get('overlayPosition'));
@@ -210,6 +296,7 @@ function showMeme({ mediaUrl, mediaKind, text, author, customDuration, forceDura
       mediaKind: mediaKind || null,
       text: text || '',
       author: author || null,
+      source: source || null,
       duration,
       forceDuration: !!forceDuration,
       volume,
@@ -254,6 +341,7 @@ function handleWsMessage(msg) {
       mediaKind: msg.mediaKind,
       text: msg.text,
       author: msg.author,
+      source: msg.source || null,
       customDuration: msg.duration || null,
       forceDuration: !!msg.forceDuration
     });
@@ -784,6 +872,23 @@ ipcMain.handle('common:quit-app', () => {
   return true;
 });
 
+ipcMain.handle('update:get', () => ({
+  available: !!updateInfo,
+  version: updateInfo?.version || null,
+  name: updateInfo?.name || null,
+  state: updateDownloadState,
+  currentVersion: app.getVersion()
+}));
+
+ipcMain.handle('update:check-now', async () => {
+  await checkForUpdate();
+  return { ok: true };
+});
+
+ipcMain.handle('update:download', async () => {
+  return await downloadAndLaunchUpdate();
+});
+
 ipcMain.handle('admin:get-state', () => ({
   serverUrl: store.get('serverUrl'),
   serverAdminPassword: store.get('serverAdminPassword'),
@@ -929,6 +1034,9 @@ if (!gotLock) {
       }
       connectAllWs();
     }
+    // Check pour les mises a jour au demarrage et toutes les heures
+    setTimeout(checkForUpdate, 3000); // delai pour pas saturer le boot
+    setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS);
   });
 
   app.on('window-all-closed', (e) => { e.preventDefault(); });

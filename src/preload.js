@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('memedrop', {
   setOverlayPosition: (pos) => ipcRenderer.invoke('common:set-overlay-position', pos),
   setOverlayOpacity: (opacity) => ipcRenderer.invoke('common:set-overlay-opacity', opacity),
 
+  // Update system
+  getUpdate: () => ipcRenderer.invoke('update:get'),
+  checkUpdate: () => ipcRenderer.invoke('update:check-now'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  onUpdateStatus: (cb) => ipcRenderer.on('update:status', (_e, data) => cb(data)),
+
   // User panel
   getUserState: () => ipcRenderer.invoke('user:get-state'),
   onUserState: (cb) => ipcRenderer.on('user:state', (_e, data) => cb(data)),
