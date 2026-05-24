@@ -140,9 +140,9 @@ async function resolveTikTokDirectMp4(originalUrl, attempts = 3) {
 const INSTAGRAM_RE = /instagram\.com\/(reel|reels|p)\/([A-Za-z0-9_-]+)/i;
 const TWITTER_RE = /(?:twitter\.com|x\.com)\/([^/\s?#]+)\/status\/(\d+)/i;
 
-// Appelle yt-dlp pour extraire l'URL directe d'une video/image.
-// Retourne null si yt-dlp pas installe, timeout, ou echec.
-function ytDlpGetUrl(originalUrl, timeoutMs = 35000) {
+const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
+function ytDlpGetUrlOnce(originalUrl, timeoutMs = 25000) {
   return new Promise((resolve) => {
     const t0 = Date.now();
     let proc;
@@ -152,7 +152,8 @@ function ytDlpGetUrl(originalUrl, timeoutMs = 35000) {
         '-f', 'best[ext=mp4]/best',
         '--no-warnings',
         '--no-playlist',
-        '--socket-timeout', '15',
+        '--socket-timeout', '12',
+        '--user-agent', MOBILE_UA,
         originalUrl
       ]);
     } catch (e) {
@@ -181,7 +182,8 @@ function ytDlpGetUrl(originalUrl, timeoutMs = 35000) {
       if (killed) return;
       const ms = Date.now() - t0;
       if (code !== 0) {
-        console.log(`[yt-dlp] exit ${code} (${ms}ms) for ${originalUrl} :: ${err.trim().split('\n').pop() || ''}`);
+        const lastErr = err.trim().split('\n').pop() || '';
+        console.log(`[yt-dlp] exit ${code} (${ms}ms) :: ${lastErr.slice(0, 200)}`);
         return resolve(null);
       }
       const url = (out.trim().split('\n')[0] || '').trim();
@@ -193,6 +195,21 @@ function ytDlpGetUrl(originalUrl, timeoutMs = 35000) {
       resolve(url);
     });
   });
+}
+
+// Wrapper avec retry : TikTok flag parfois les requetes consecutives, un retry
+// apres delai resout souvent le probleme.
+async function ytDlpGetUrl(originalUrl, timeoutMs = 25000, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    const url = await ytDlpGetUrlOnce(originalUrl, timeoutMs);
+    if (url) return url;
+    if (i < attempts - 1) {
+      const wait = 1500 + i * 1000; // 1.5s, 2.5s
+      console.log(`[yt-dlp] retry ${i + 2}/${attempts} in ${wait}ms`);
+      await sleep(wait);
+    }
+  }
+  return null;
 }
 
 function guessKindFromUrl(url) {
