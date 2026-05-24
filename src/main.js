@@ -278,7 +278,7 @@ function positionOverlay(position) {
   overlayWindow.setPosition(x, y);
 }
 
-function showMeme({ mediaUrl, mediaKind, text, author, source, customDuration, forceDuration }) {
+function showMeme({ mediaUrl, mediaKind, audioUrl, text, author, source, customDuration, forceDuration }) {
   if (store.get('disabled')) return; // user a coupe la reception
   if (!overlayWindow) createOverlayWindow();
   positionOverlay(store.get('overlayPosition'));
@@ -294,6 +294,7 @@ function showMeme({ mediaUrl, mediaKind, text, author, source, customDuration, f
     overlayWindow.webContents.send('meme:show', {
       mediaUrl: mediaUrl || null,
       mediaKind: mediaKind || null,
+      audioUrl: audioUrl || null,
       text: text || '',
       author: author || null,
       source: source || null,
@@ -339,6 +340,7 @@ function handleWsMessage(msg) {
     showMeme({
       mediaUrl: msg.mediaUrl,
       mediaKind: msg.mediaKind,
+      audioUrl: msg.audioUrl || null,
       text: msg.text,
       author: msg.author,
       source: msg.source || null,

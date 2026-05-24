@@ -220,24 +220,29 @@
   let queue = [];
   let playing = false;
   let currentMediaEl = null;
-  let currentMediaKind = null; // 'image' | 'video' | 'audio' | 'tiktok'
+  let currentMediaKind = null; // 'image' | 'video' | 'audio' | 'image-audio'
+  let currentAudioEl = null;   // utilise pour 'image-audio' (audio separe de l'image)
   let currentVolume = 80;
   let currentMuted = false;
 
   function applyVolumeToMedia(volume, muted) {
-    if (!currentMediaEl) return;
     try {
       if (currentMediaKind === 'video' || currentMediaKind === 'audio') {
-        currentMediaEl.volume = volume / 100;
-        currentMediaEl.muted = muted;
+        if (currentMediaEl) {
+          currentMediaEl.volume = volume / 100;
+          currentMediaEl.muted = muted;
+        }
+      } else if (currentMediaKind === 'image-audio' && currentAudioEl) {
+        currentAudioEl.volume = volume / 100;
+        currentAudioEl.muted = muted;
       }
     } catch (_) {}
   }
 
   function pauseCurrentMedia() {
-    if (!currentMediaEl) return;
     try {
-      if (typeof currentMediaEl.pause === 'function') currentMediaEl.pause();
+      if (currentMediaEl && typeof currentMediaEl.pause === 'function') currentMediaEl.pause();
+      if (currentAudioEl && typeof currentAudioEl.pause === 'function') currentAudioEl.pause();
     } catch (_) {}
   }
 
@@ -245,6 +250,7 @@
     pauseCurrentMedia();
     if (gifLoopTimer) { clearInterval(gifLoopTimer); gifLoopTimer = null; }
     currentMediaEl = null;
+    currentAudioEl = null;
     currentMediaKind = null;
     mediaInner.innerHTML = '';
     textEl.textContent = '';
@@ -309,7 +315,7 @@
     return Math.min(MAX_DURATION_MS, Math.max(2000, ms));
   }
 
-  function render({ mediaUrl, mediaKind, text, author, source, duration, forceDuration, volume, muted }) {
+  function render({ mediaUrl, mediaKind, audioUrl, text, author, source, duration, forceDuration, volume, muted }) {
     clearStage();
     textEl.textContent = text || '';
     renderAuthor(author, source);
@@ -319,6 +325,16 @@
     currentVolume = Math.max(0, Math.min(100, Number(volume ?? 80)));
     currentMuted = !!muted;
     const vol = currentVolume / 100;
+
+    // Choisit la duree finale selon le type de media :
+    // - forceDuration -> cfgMs tel quel (commande Discord ":Ns")
+    // - video/audio/image-audio -> duree exacte du media (cap 60s)
+    // - image/texte -> cfgMs (defaut config user)
+    function pickDuration(mediaMs) {
+      if (force) return cfgMs;
+      if (mediaMs && isFinite(mediaMs) && mediaMs > 0) return capMs(mediaMs);
+      return capMs(cfgMs);
+    }
 
     if (!mediaUrl) {
       stage.classList.add('text-only');
@@ -375,9 +391,9 @@
       v.playsInline = true;
       v.controls = false;
       v.onloadedmetadata = () => {
-        const mediaMs = (v.duration && isFinite(v.duration)) ? v.duration * 1000 : cfgMs;
+        const mediaMs = (v.duration && isFinite(v.duration)) ? v.duration * 1000 : 0;
         showStage();
-        scheduleHide(capMs(force ? cfgMs : Math.max(mediaMs, cfgMs)));
+        scheduleHide(pickDuration(mediaMs));
       };
       v.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
       mediaInner.appendChild(v);
@@ -394,13 +410,50 @@
       a.muted = currentMuted;
       a.volume = vol;
       a.onloadedmetadata = () => {
-        const mediaMs = (a.duration && isFinite(a.duration)) ? a.duration * 1000 : cfgMs;
+        const mediaMs = (a.duration && isFinite(a.duration)) ? a.duration * 1000 : 0;
         showStage();
-        scheduleHide(capMs(force ? cfgMs : Math.max(mediaMs, cfgMs)));
+        scheduleHide(pickDuration(mediaMs));
       };
       a.onerror = () => { showStage(); scheduleHide(capMs(cfgMs)); };
       a.play().catch(() => {});
       currentMediaEl = a;
+      return;
+    }
+
+    if (mediaKind === 'image-audio') {
+      currentMediaKind = 'image-audio';
+      // Image
+      const img = new Image();
+      img.src = mediaUrl;
+      mediaInner.appendChild(img);
+      currentMediaEl = img;
+      // Audio en parallele
+      let imgReady = false;
+      let audioReady = !audioUrl; // true si pas d'audio, attend pas
+      let started = false;
+      const tryStart = () => {
+        if (started || !imgReady || !audioReady) return;
+        started = true;
+        showStage();
+        const mediaMs = (currentAudioEl && currentAudioEl.duration && isFinite(currentAudioEl.duration))
+          ? currentAudioEl.duration * 1000 : 0;
+        scheduleHide(pickDuration(mediaMs));
+      };
+      img.onload = () => { imgReady = true; tryStart(); };
+      img.onerror = () => { imgReady = true; tryStart(); };
+      if (audioUrl) {
+        const a = new Audio(audioUrl);
+        a.autoplay = true;
+        a.muted = currentMuted;
+        a.volume = vol;
+        a.loop = false;
+        a.onloadedmetadata = () => { audioReady = true; tryStart(); };
+        a.onerror = () => { audioReady = true; tryStart(); };
+        a.play().catch(() => {});
+        currentAudioEl = a;
+      }
+      // Safety net : si rien ne charge en 5s
+      setTimeout(() => { if (!started) { imgReady = true; audioReady = true; tryStart(); } }, 5000);
       return;
     }
 

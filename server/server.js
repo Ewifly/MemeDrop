@@ -79,7 +79,8 @@ function pickMediaFromAttachments(attachments) {
   return null;
 }
 
-const TIKTOK_LONG_RE = /tiktok\.com\/(?:@[^/]+\/video\/|v\/)([0-9]+)/i;
+const TIKTOK_LONG_RE = /tiktok\.com\/(?:@[^/]+\/(?:video|photo)\/|v\/)([0-9]+)/i;
+const TIKTOK_PHOTO_RE = /tiktok\.com\/@[^/]+\/photo\/[0-9]+/i;
 const TIKTOK_SHORT_RE = /(?:vm|vt)\.tiktok\.com\/([A-Za-z0-9]+)/i;
 
 function extractTikTokId(url) {
@@ -101,8 +102,10 @@ async function resolveTikTokShortUrl(shortUrl) {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-// Recupere l'URL directe MP4 d'une video TikTok via l'API publique tikwm.com.
-// Retries jusqu'a `attempts` fois en cas de rate limit ou erreur reseau.
+// Recupere les infos TikTok via tikwm. Renvoie soit :
+// - { kind: 'video', url: mp4Url }
+// - { kind: 'image-audio', imageUrl, audioUrl } pour les TikTok photo+audio
+// - null en cas d'echec
 async function resolveTikTokDirectMp4(originalUrl, attempts = 3) {
   for (let i = 0; i < attempts; i++) {
     try {
@@ -117,14 +120,20 @@ async function resolveTikTokDirectMp4(originalUrl, attempts = 3) {
       }
       const data = await res.json();
       if (data && data.code === 0 && data.data) {
+        // TikTok photo+audio : data.images (array) + data.music
+        if (Array.isArray(data.data.images) && data.data.images.length > 0) {
+          const imageUrl = data.data.images[0];
+          const audioUrl = data.data.music || null;
+          return { kind: 'image-audio', imageUrl, audioUrl };
+        }
+        // TikTok video classique
         const play = data.data.play || data.data.wmplay;
-        if (play) return play;
+        if (play) return { kind: 'video', url: play };
       }
       // Rate limited / video privee / autre
       const msg = (data && data.msg) || 'unknown';
       console.log(`[tikwm] code=${data && data.code} msg="${msg}" attempt ${i + 1}/${attempts}`);
       if (data && data.code === -1 && i < attempts - 1) {
-        // rate limit -> wait more before retry
         await sleep(2000);
         continue;
       }
@@ -353,7 +362,17 @@ async function handleIncomingMessage(message) {
   for (const u of urls) {
     // TikTok : essayer tikwm puis yt-dlp en fallback (les 2 evitent le cookie wall)
     if (TIKTOK_LONG_RE.test(u) || TIKTOK_SHORT_RE.test(u)) {
-      let mp4 = await resolveTikTokDirectMp4(u);
+      const tt = await resolveTikTokDirectMp4(u);
+      if (tt && tt.kind === 'image-audio') {
+        broadcastToRoom(room.code, meme({
+          mediaUrl: tt.imageUrl,
+          mediaKind: 'image-audio',
+          audioUrl: tt.audioUrl,
+          text: cleanTextFromUrl(text, u)
+        }));
+        return;
+      }
+      let mp4 = tt && tt.kind === 'video' ? tt.url : null;
       if (!mp4) {
         // Fallback yt-dlp (gere mieux le rate limit / videos privees / variants)
         mp4 = await ytDlpGetUrl(u);
