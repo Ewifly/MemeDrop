@@ -581,7 +581,8 @@ function startDiscord() {
   });
 
   discordClient.on('messageCreate', (message) => {
-    if (message.author.bot) return;
+    // On accepte nos propres messages (postes via library/send) mais on ignore les autres bots
+    if (message.author.bot && message.author.id !== discordClient.user?.id) return;
     handleIncomingMessage(message);
   });
 
