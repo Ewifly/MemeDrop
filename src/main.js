@@ -36,8 +36,9 @@ const store = new Store({
     volume: 80,        // 0-100
     muted: false,
     disabled: false,
-    displayName: '',           // pseudo pour les renvois depuis la bibliotheque
-    displayAvatarUrl: ''       // URL avatar optionnel pour les renvois
+    displayName: '',           // (legacy, plus utilise) pseudo manuel
+    displayAvatarUrl: '',      // (legacy, plus utilise) avatar manuel
+    discordUserId: ''          // Discord User ID : le serveur fetch automatiquement pseudo + avatar
   }
 });
 
@@ -969,20 +970,21 @@ ipcMain.handle('library:send', async (_e, data) => {
       mediaUrl: data.mediaUrl || '',
       text: data.text || '',
       roomCode: data.roomCode || '',
-      senderName: (store.get('displayName') || '').trim(),
-      senderAvatarUrl: (store.get('displayAvatarUrl') || '').trim()
+      senderDiscordId: (store.get('discordUserId') || '').trim()
     })
   });
 });
 
 ipcMain.handle('identity:get', () => ({
-  displayName: store.get('displayName') || '',
-  displayAvatarUrl: store.get('displayAvatarUrl') || ''
+  discordUserId: store.get('discordUserId') || ''
 }));
 
 ipcMain.handle('identity:set', (_e, data) => {
-  if (typeof data?.displayName === 'string') store.set('displayName', data.displayName.trim());
-  if (typeof data?.displayAvatarUrl === 'string') store.set('displayAvatarUrl', data.displayAvatarUrl.trim());
+  if (typeof data?.discordUserId === 'string') {
+    // Garde uniquement les chiffres (les User ID Discord sont des snowflakes numeriques)
+    const cleaned = data.discordUserId.replace(/\D+/g, '');
+    store.set('discordUserId', cleaned);
+  }
   return true;
 });
 

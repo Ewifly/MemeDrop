@@ -329,13 +329,12 @@
   <div class="section">
     <h2>Mon identite (pour la bibliotheque)</h2>
     <div class="field">
-      <label>Pseudo</label>
-      <input type="text" id="identityName" placeholder="Pseudo affiche quand tu renvoies un meme" />
-    </div>
-    <div class="field">
-      <label>URL avatar (optionnel)</label>
-      <input type="text" id="identityAvatar" placeholder="https://..." />
-      <div class="hint">Si vides, on prend l'identite de l'auteur original du meme.</div>
+      <label>Discord User ID</label>
+      <input type="text" id="identityId" inputmode="numeric" placeholder="123456789012345678" />
+      <div class="hint">
+        Le serveur recupere ton pseudo et avatar Discord automatiquement.<br />
+        Discord -> Parametres -> Avances -> "Mode developpeur", puis clic droit sur ton avatar -> "Copier l'identifiant utilisateur".
+      </div>
     </div>
   </div>
 
@@ -487,21 +486,16 @@
   // Identite (pour la bibliotheque)
   (async () => {
     const id = await window.memedrop.getIdentity();
-    $('identityName').value = id.displayName || '';
-    $('identityAvatar').value = id.displayAvatarUrl || '';
+    $('identityId').value = id.discordUserId || '';
   })();
   let identityTimer = null;
   function scheduleIdentitySave() {
     if (identityTimer) clearTimeout(identityTimer);
     identityTimer = setTimeout(() => {
-      window.memedrop.setIdentity({
-        displayName: $('identityName').value.trim(),
-        displayAvatarUrl: $('identityAvatar').value.trim()
-      });
+      window.memedrop.setIdentity({ discordUserId: $('identityId').value.trim() });
     }, 500);
   }
-  $('identityName').addEventListener('input', scheduleIdentitySave);
-  $('identityAvatar').addEventListener('input', scheduleIdentitySave);
+  $('identityId').addEventListener('input', scheduleIdentitySave);
 
   $('btnSaveLocal').addEventListener('click', async () => {
     await window.memedrop.saveLocal({

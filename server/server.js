@@ -78,6 +78,31 @@ function libraryHash(s) {
   return 'e' + Math.abs(h).toString(36);
 }
 
+// Recupere l'identite Discord (pseudo + avatar) d'un user a partir de son ID.
+// Prefere le nickname du serveur (member.displayName) si dispo, sinon globalName/username.
+// Renvoie { name, avatarUrl } ou null si fetch echoue.
+async function fetchDiscordIdentity(channel, userId) {
+  if (!userId || !discordClient) return null;
+  // Tente d'abord member (pour avoir le nickname du serveur)
+  try {
+    const member = await channel.guild.members.fetch(userId);
+    return {
+      name: member.displayName || member.user.globalName || member.user.username,
+      avatarUrl: member.displayAvatarURL({ size: 128, extension: 'png' })
+    };
+  } catch (_) {}
+  // Fallback : juste l'user global
+  try {
+    const user = await discordClient.users.fetch(userId);
+    return {
+      name: user.globalName || user.username,
+      avatarUrl: user.displayAvatarURL({ size: 128, extension: 'png' })
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 // Recupere ou cree un webhook "MemeDrop Relay" pour pouvoir poster avec un
 // pseudo + avatar custom (= l'auteur original du meme).
 // Requiert la permission Manage Webhooks sur le bot dans le channel.
@@ -834,15 +859,28 @@ const server = http.createServer(async (req, res) => {
         if (!channel || !channel.send) return send(res, 502, { error: 'channel_unavailable' });
         const content = [text, mediaUrl].filter(Boolean).join('\n');
 
-        // Determine l'identite a afficher : senderName du body > auteur original > rien
-        const senderName = (body.senderName && String(body.senderName).trim()) || null;
-        const senderAvatar = (body.senderAvatarUrl && String(body.senderAvatarUrl).trim()) || null;
-        const entryHash = libraryHash(mediaUrl);
-        const entry = library.find((e) => e.id === entryHash);
-        const fallbackName = entry?.author?.name || null;
-        const fallbackAvatar = entry?.author?.avatarUrl || null;
-        const finalName = senderName || fallbackName;
-        const finalAvatar = senderAvatar || fallbackAvatar;
+        // Determine l'identite a afficher :
+        // 1. Discord User ID fourni -> fetch via API (pseudo + avatar reels)
+        // 2. Sinon auteur original du meme (fallback)
+        let finalName = null;
+        let finalAvatar = null;
+        const senderId = (body.senderDiscordId && String(body.senderDiscordId).trim()) || null;
+        if (senderId) {
+          const identity = await fetchDiscordIdentity(channel, senderId);
+          if (identity) {
+            finalName = identity.name;
+            finalAvatar = identity.avatarUrl;
+          } else {
+            console.log('[library/send] fetchDiscordIdentity failed for id=' + senderId);
+          }
+        }
+        if (!finalName) {
+          // Fallback : auteur original du meme stocke dans la library
+          const entryHash = libraryHash(mediaUrl);
+          const entry = library.find((e) => e.id === entryHash);
+          finalName = entry?.author?.name || null;
+          finalAvatar = entry?.author?.avatarUrl || null;
+        }
 
         // Tente d'utiliser un webhook pour poster sous l'identite choisie
         if (finalName) {
