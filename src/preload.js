@@ -34,6 +34,12 @@ contextBridge.exposeInMainWorld('memedrop', {
   downloadUpdate: () => ipcRenderer.invoke('update:download'),
   onUpdateStatus: (cb) => ipcRenderer.on('update:status', (_e, data) => cb(data)),
 
+  // Library
+  openLibrary: () => ipcRenderer.invoke('library:open'),
+  libraryList: (opts) => ipcRenderer.invoke('library:list', opts || {}),
+  librarySend: (data) => ipcRenderer.invoke('library:send', data),
+  libraryRooms: () => ipcRenderer.invoke('library:rooms'),
+
   // User panel
   getUserState: () => ipcRenderer.invoke('user:get-state'),
   onUserState: (cb) => ipcRenderer.on('user:state', (_e, data) => cb(data)),

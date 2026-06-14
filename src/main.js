@@ -151,6 +151,7 @@ let tray = null;
 let welcomeWindow = null;
 let adminWindow = null;
 let userWindow = null;
+let libraryWindow = null;
 let overlayWindow = null;
 let trayPopupWindow = null;
 
@@ -522,7 +523,7 @@ function notifyUserState() {
   }
 }
 
-// --- Admin HTTP helpers ---
+// --- HTTP helpers ---
 
 async function adminFetch(pathname, options = {}) {
   const httpBase = httpUrlFromWs(store.get('serverUrl'));
@@ -532,6 +533,30 @@ async function adminFetch(pathname, options = {}) {
     'Content-Type': 'application/json',
     'X-Admin-Password': store.get('serverAdminPassword') || ''
   };
+  try {
+    const res = await fetch(url, { ...options, headers });
+    const text = await res.text();
+    let body;
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+    return { ok: res.ok, status: res.status, body };
+  } catch (e) {
+    return { ok: false, status: 0, body: { error: e.message } };
+  }
+}
+
+// Fetch authentifie par codes user OU mdp admin selon le mode courant.
+async function userOrAdminFetch(pathname, options = {}) {
+  const httpBase = httpUrlFromWs(store.get('serverUrl'));
+  if (!httpBase) return { ok: false, status: 0, body: { error: 'no_server_url' } };
+  const url = httpBase + pathname;
+  const mode = store.get('mode');
+  const headers = { 'Content-Type': 'application/json' };
+  if (mode === 'admin') {
+    headers['X-Admin-Password'] = store.get('serverAdminPassword') || '';
+  } else {
+    const codes = (store.get('userCodes') || []).filter(Boolean);
+    headers['X-User-Codes'] = codes.join(',');
+  }
   try {
     const res = await fetch(url, { ...options, headers });
     const text = await res.text();
@@ -568,6 +593,32 @@ function createWelcomeWindow() {
   welcomeWindow.loadFile(path.join(__dirname, 'welcome.html'));
   // Welcome = ecran d'onboarding : on ne demande pas "que faire au close"
   welcomeWindow.on('closed', () => { welcomeWindow = null; });
+}
+
+function createLibraryWindow() {
+  if (libraryWindow && !libraryWindow.isDestroyed()) {
+    if (!libraryWindow.isVisible()) libraryWindow.show();
+    if (libraryWindow.isMinimized()) libraryWindow.restore();
+    libraryWindow.focus();
+    return;
+  }
+  libraryWindow = new BrowserWindow({
+    width: 900,
+    height: 700,
+    minWidth: 600,
+    minHeight: 500,
+    title: 'MemeDrop - Bibliotheque',
+    icon: iconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  libraryWindow.setMenu(null);
+  libraryWindow.loadFile(path.join(__dirname, 'library.html'));
+  attachCloseBehavior(libraryWindow);
+  libraryWindow.on('closed', () => { libraryWindow = null; });
 }
 
 function createUserWindow() {
@@ -771,6 +822,7 @@ function goBackToWelcome() {
   roomNameByCode = {};
   if (adminWindow && !adminWindow.isDestroyed()) { adminWindow.destroy(); adminWindow = null; }
   if (userWindow && !userWindow.isDestroyed()) { userWindow.destroy(); userWindow = null; }
+  if (libraryWindow && !libraryWindow.isDestroyed()) { libraryWindow.destroy(); libraryWindow = null; }
   if (tray) tray.setContextMenu(buildTrayMenu());
   createWelcomeWindow();
 }
@@ -891,6 +943,48 @@ ipcMain.handle('update:check-now', async () => {
 
 ipcMain.handle('update:download', async () => {
   return await downloadAndLaunchUpdate();
+});
+
+// --- Library ---
+
+ipcMain.handle('library:open', () => {
+  createLibraryWindow();
+  return true;
+});
+
+ipcMain.handle('library:list', async (_e, opts) => {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  if (opts?.offset) params.set('offset', String(opts.offset));
+  const qs = params.toString();
+  return await userOrAdminFetch('/library' + (qs ? '?' + qs : ''));
+});
+
+ipcMain.handle('library:send', async (_e, data) => {
+  return await userOrAdminFetch('/library/send', {
+    method: 'POST',
+    body: JSON.stringify({
+      mediaUrl: data.mediaUrl || '',
+      text: data.text || '',
+      roomCode: data.roomCode || ''
+    })
+  });
+});
+
+ipcMain.handle('library:rooms', () => {
+  // Renvoie les rooms ou l'user peut envoyer (codes connus dans son userCodes,
+  // ou tous les rooms si admin avec roomName quand dispo).
+  const mode = store.get('mode');
+  if (mode === 'admin') {
+    // On va chercher la liste cote serveur via adminFetch
+    return adminFetch('/admin/status').then((r) => {
+      if (!r.ok) return [];
+      return (r.body.rooms || []).map((rr) => ({ code: rr.code, name: rr.name || '' }));
+    });
+  }
+  // User : on liste les codes + le roomName si on l'a recu via WS hello
+  const codes = (store.get('userCodes') || []).filter(Boolean);
+  return codes.map((c) => ({ code: c, name: roomNameByCode[c] || '' }));
 });
 
 ipcMain.handle('admin:get-state', () => ({

@@ -8,6 +8,8 @@ const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const PORT = Number(process.env.PORT) || 8787;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123456';
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, 'config.json');
+const LIBRARY_PATH = process.env.LIBRARY_PATH || path.join(__dirname, 'library.json');
+const LIBRARY_MAX_ENTRIES = 5000;
 
 const MEDIA_RE = {
   image: /\.(png|jpe?g|gif|webp|bmp)$/i,
@@ -16,6 +18,7 @@ const MEDIA_RE = {
 };
 
 let config = loadConfig();
+let library = loadLibrary();
 let discordClient = null;
 let reconnectTimer = null;
 let discordStatus = 'stopped';
@@ -40,6 +43,70 @@ function saveConfig() {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
+// --- Bibliotheque ---
+
+function loadLibrary() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(LIBRARY_PATH, 'utf8'));
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.entries)) return raw.entries;
+    return [];
+  } catch (_) {
+    return [];
+  }
+}
+
+let librarySaveTimer = null;
+function saveLibrary() {
+  // Debounce les ecritures (les memes arrivent en rafale parfois)
+  if (librarySaveTimer) return;
+  librarySaveTimer = setTimeout(() => {
+    librarySaveTimer = null;
+    try { fs.writeFileSync(LIBRARY_PATH, JSON.stringify(library, null, 2)); }
+    catch (e) { console.error('[library] save error:', e.message); }
+  }, 2000);
+}
+
+function libraryHash(s) {
+  // Hash simple non cryptographique pour dedup
+  let h = 0;
+  s = String(s);
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return 'e' + Math.abs(h).toString(36);
+}
+
+function addToLibrary({ mediaUrl, mediaKind, audioUrl, text, author, source }) {
+  // On stocke uniquement si il y a un media (les texte-seuls ne servent a rien dans la lib)
+  if (!mediaUrl) return;
+  const id = libraryHash(mediaUrl);
+  const existing = library.find((e) => e.id === id);
+  if (existing) {
+    existing.usageCount = (existing.usageCount || 1) + 1;
+    existing.lastSeenAt = Date.now();
+    saveLibrary();
+    return;
+  }
+  const entry = {
+    id,
+    mediaUrl,
+    mediaKind: mediaKind || 'image',
+    audioUrl: audioUrl || null,
+    text: text || '',
+    author: author || null,
+    source: source || null,
+    createdAt: Date.now(),
+    lastSeenAt: Date.now(),
+    usageCount: 1
+  };
+  library.unshift(entry);
+  if (library.length > LIBRARY_MAX_ENTRIES) {
+    library.length = LIBRARY_MAX_ENTRIES;
+  }
+  saveLibrary();
+}
+
 function findRoomByCode(code) {
   return config.rooms.find((r) => r.code === code) || null;
 }
@@ -49,6 +116,17 @@ function findRoomByChannelId(channelId) {
 }
 
 function broadcastToRoom(roomCode, payload) {
+  // Capture dans la bibliotheque (sauf si pas de media)
+  if (payload && payload.type === 'meme' && payload.mediaUrl) {
+    addToLibrary({
+      mediaUrl: payload.mediaUrl,
+      mediaKind: payload.mediaKind,
+      audioUrl: payload.audioUrl,
+      text: payload.text,
+      author: payload.author,
+      source: payload.source
+    });
+  }
   const data = JSON.stringify(payload);
   for (const ws of clients) {
     if (ws.readyState !== ws.OPEN) continue;
@@ -556,6 +634,20 @@ function checkAdmin(req) {
   return pwd && pwd === ADMIN_PASSWORD;
 }
 
+// Renvoie l'array de room codes que le client est autorise a manipuler.
+// Admin = tous les rooms. User = uniquement ceux passes en header X-User-Codes.
+function getAllowedRoomCodes(req) {
+  if (checkAdmin(req)) {
+    return config.rooms.map((r) => r.code);
+  }
+  const raw = req.headers['x-user-codes'];
+  if (!raw) return [];
+  const codes = String(raw).split(',').map((s) => s.trim()).filter(Boolean);
+  // Filtrer ceux qui existent reellement
+  const known = new Set(config.rooms.map((r) => r.code));
+  return codes.filter((c) => known.has(c));
+}
+
 function readJson(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -676,6 +768,53 @@ const server = http.createServer(async (req, res) => {
       if (code) broadcastToRoom(code, payload);
       else broadcastToAll(payload);
       return send(res, 200, { ok: true });
+    } catch {
+      return send(res, 400, { error: 'bad_json' });
+    }
+  }
+
+  // Bibliotheque : liste paginee filtree par codes du user (ou tous si admin)
+  if (url.pathname === '/library' && req.method === 'GET') {
+    const allowedCodes = getAllowedRoomCodes(req);
+    if (allowedCodes.length === 0) return send(res, 401, { error: 'unauthorized' });
+    const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit') || '200', 10)));
+    const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10));
+    const allowedSet = new Set(allowedCodes);
+    const filtered = library.filter((e) => e.source && allowedSet.has(e.source.roomCode));
+    const slice = filtered.slice(offset, offset + limit);
+    return send(res, 200, { total: filtered.length, entries: slice });
+  }
+
+  // Envoyer un media (depuis la bibliotheque ou directement) vers un salon
+  // Body : { mediaUrl, mediaKind?, text?, roomCode } - poste le media dans le channel Discord
+  if (url.pathname === '/library/send' && req.method === 'POST') {
+    const allowedCodes = getAllowedRoomCodes(req);
+    if (allowedCodes.length === 0) return send(res, 401, { error: 'unauthorized' });
+    try {
+      const body = await readJson(req);
+      const targetCode = String(body.roomCode || '').trim();
+      const mediaUrl = String(body.mediaUrl || '').trim();
+      const text = String(body.text || '').trim();
+      if (!targetCode) return send(res, 400, { error: 'missing_roomCode' });
+      if (!mediaUrl && !text) return send(res, 400, { error: 'missing_content' });
+      if (!allowedCodes.includes(targetCode)) return send(res, 403, { error: 'forbidden_room' });
+      const room = findRoomByCode(targetCode);
+      if (!room) return send(res, 404, { error: 'room_not_found' });
+      if (!discordClient || discordStatus !== 'connected') {
+        return send(res, 503, { error: 'bot_not_connected' });
+      }
+      try {
+        const channel = discordClient.channels.cache.get(room.channelId)
+          || await discordClient.channels.fetch(room.channelId);
+        if (!channel || !channel.send) return send(res, 502, { error: 'channel_unavailable' });
+        // On poste le texte + URL (Discord auto-embed)
+        const content = [text, mediaUrl].filter(Boolean).join('\n');
+        await channel.send({ content });
+        return send(res, 200, { ok: true });
+      } catch (e) {
+        console.error('[library/send] discord error:', e.message);
+        return send(res, 500, { error: 'discord_send_failed', detail: e.message });
+      }
     } catch {
       return send(res, 400, { error: 'bad_json' });
     }

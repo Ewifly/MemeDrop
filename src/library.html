@@ -1,0 +1,409 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>MemeDrop - Bibliotheque</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #1e1f2b;
+    color: #e6e6f0;
+    font-family: 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+  }
+  .wrap {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .header {
+    flex: 0 0 auto;
+    padding: 18px 22px;
+    border-bottom: 1px solid #32354a;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 22px;
+    background: linear-gradient(90deg, #5865F2, #eb459e);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .header .count { color: #9aa0b4; font-size: 12.5px; }
+  .header input[type=text] {
+    flex: 1;
+    max-width: 280px;
+    padding: 7px 11px;
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    border-radius: 7px;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+  }
+  .header input[type=text]:focus { border-color: #5865F2; }
+  .header button {
+    padding: 7px 12px;
+    background: #2a2c3c;
+    color: #e6e6f0;
+    border: 1px solid #3a3d52;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .header button:hover { background: #34374a; }
+
+  .grid-wrap {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 18px 22px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: #25273a;
+    border: 1px solid #32354a;
+    border-radius: 9px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 100ms, border-color 100ms;
+    position: relative;
+  }
+  .card:hover { transform: translateY(-2px); border-color: #5865F2; }
+  .card .thumb {
+    aspect-ratio: 1 / 1;
+    background: #1a1b25;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+  .card .thumb img,
+  .card .thumb video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .card .thumb .icon {
+    font-size: 38px;
+    color: #5865F2;
+  }
+  .card .thumb .badge-kind {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .card .info {
+    padding: 8px 10px 10px;
+  }
+  .card .text {
+    color: #e6e6f0;
+    font-size: 12px;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 32px;
+  }
+  .card .meta {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    color: #7c8099;
+  }
+  .card .meta img {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+  }
+  .empty {
+    text-align: center;
+    color: #7c8099;
+    padding: 40px;
+    font-style: italic;
+  }
+
+  /* Modal d'envoi */
+  .modal-bg {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 30px;
+  }
+  .modal-bg.visible { display: flex; }
+  .modal {
+    background: #25273a;
+    border: 1px solid #32354a;
+    border-radius: 12px;
+    max-width: 520px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 22px;
+  }
+  .modal h3 {
+    margin: 0 0 10px;
+    font-size: 16px;
+  }
+  .modal .preview {
+    margin-bottom: 14px;
+    border-radius: 8px;
+    background: #1a1b25;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-height: 280px;
+  }
+  .modal .preview img,
+  .modal .preview video {
+    max-width: 100%;
+    max-height: 280px;
+    display: block;
+  }
+  .modal label {
+    display: block;
+    font-size: 11px;
+    color: #9aa0b4;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .modal textarea,
+  .modal select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 11px;
+    background: #2a2c3c;
+    border: 1px solid #3a3d52;
+    border-radius: 7px;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+    font-family: inherit;
+    margin-bottom: 12px;
+  }
+  .modal textarea { resize: vertical; min-height: 50px; }
+  .modal textarea:focus, .modal select:focus { border-color: #5865F2; }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .modal-actions button {
+    padding: 9px 16px;
+    border-radius: 7px;
+    border: none;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .modal-actions .btn-cancel { background: #2a2c3c; color: #e6e6f0; border: 1px solid #3a3d52; }
+  .modal-actions .btn-cancel:hover { background: #34374a; }
+  .modal-actions .btn-send { background: #5865F2; color: #fff; }
+  .modal-actions .btn-send:hover { background: #4752c4; }
+  .modal-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>Bibliotheque</h1>
+    <div class="count" id="count"></div>
+    <input type="text" id="search" placeholder="Rechercher dans les textes..." />
+    <button id="btnRefresh">Rafraichir</button>
+  </div>
+  <div class="grid-wrap">
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" style="display:none;">Aucun media en bibliotheque pour l'instant.</div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <h3>Envoyer dans un salon</h3>
+    <div class="preview" id="preview"></div>
+    <label>Texte (optionnel)</label>
+    <textarea id="modalText" rows="2" placeholder="Ajouter un commentaire..."></textarea>
+    <label>Salon de destination</label>
+    <select id="modalRoom"></select>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btnCancel">Annuler</button>
+      <button class="btn-send" id="btnSend">Envoyer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const grid = $('grid');
+  let entries = [];
+  let rooms = [];
+  let currentEntry = null;
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function renderCard(e) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.id = e.id;
+    const kind = e.mediaKind || 'image';
+    let thumbHtml;
+    if (kind === 'image' || kind === 'image-audio') {
+      thumbHtml = `<img src="${escapeHtml(e.mediaUrl)}" alt="" loading="lazy" />`;
+    } else if (kind === 'video') {
+      // poster = premiere frame via attribute (Chrome supporte muted+preload metadata)
+      thumbHtml = `<video src="${escapeHtml(e.mediaUrl)}" preload="metadata" muted playsinline></video>`;
+    } else if (kind === 'audio') {
+      thumbHtml = `<div class="icon">🎵</div>`;
+    } else {
+      thumbHtml = `<div class="icon">📎</div>`;
+    }
+    const badge = kind === 'image-audio' ? 'img+🎵' : kind;
+    const authorBlock = e.author?.name
+      ? `<div class="meta">${e.author.avatarUrl ? `<img src="${escapeHtml(e.author.avatarUrl)}" />` : ''}<span>${escapeHtml(e.author.name)}</span></div>`
+      : '';
+    card.innerHTML = `
+      <div class="thumb">${thumbHtml}<div class="badge-kind">${escapeHtml(badge)}</div></div>
+      <div class="info">
+        <div class="text">${escapeHtml(e.text || '(sans texte)')}</div>
+        ${authorBlock}
+      </div>
+    `;
+    card.addEventListener('click', () => openModal(e));
+    return card;
+  }
+
+  function renderGrid() {
+    const q = $('search').value.trim().toLowerCase();
+    const filtered = q
+      ? entries.filter((e) => (e.text || '').toLowerCase().includes(q) || (e.author?.name || '').toLowerCase().includes(q))
+      : entries;
+    grid.innerHTML = '';
+    if (filtered.length === 0) {
+      $('empty').style.display = 'block';
+    } else {
+      $('empty').style.display = 'none';
+      for (const e of filtered) grid.appendChild(renderCard(e));
+    }
+    $('count').textContent = `${entries.length} media${entries.length > 1 ? 's' : ''}`;
+  }
+
+  async function load() {
+    grid.innerHTML = '<div class="empty">Chargement...</div>';
+    const res = await window.memedrop.libraryList({ limit: 500 });
+    if (!res.ok) {
+      grid.innerHTML = '<div class="empty">Erreur : ' + (res.body?.error || res.status) + '</div>';
+      return;
+    }
+    entries = res.body.entries || [];
+    rooms = await window.memedrop.libraryRooms() || [];
+    // Remplit le dropdown salons
+    const roomSel = $('modalRoom');
+    roomSel.innerHTML = '';
+    if (rooms.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Aucun salon disponible';
+      roomSel.appendChild(opt);
+    } else {
+      for (const r of rooms) {
+        const opt = document.createElement('option');
+        opt.value = r.code;
+        opt.textContent = r.name ? `${r.code} - ${r.name}` : r.code;
+        roomSel.appendChild(opt);
+      }
+    }
+    renderGrid();
+  }
+
+  function openModal(e) {
+    currentEntry = e;
+    const preview = $('preview');
+    preview.innerHTML = '';
+    const kind = e.mediaKind || 'image';
+    if (kind === 'image' || kind === 'image-audio') {
+      const img = document.createElement('img');
+      img.src = e.mediaUrl;
+      preview.appendChild(img);
+    } else if (kind === 'video') {
+      const v = document.createElement('video');
+      v.src = e.mediaUrl;
+      v.controls = true;
+      v.muted = true;
+      preview.appendChild(v);
+    } else if (kind === 'audio') {
+      const a = document.createElement('audio');
+      a.src = e.mediaUrl;
+      a.controls = true;
+      preview.appendChild(a);
+    }
+    $('modalText').value = '';
+    $('modal').classList.add('visible');
+  }
+
+  function closeModal() {
+    $('modal').classList.remove('visible');
+    const preview = $('preview');
+    // pause les media pour eviter qu'ils continuent de tourner
+    preview.querySelectorAll('video, audio').forEach((m) => { try { m.pause(); } catch (_) {} });
+    currentEntry = null;
+  }
+
+  $('btnCancel').addEventListener('click', closeModal);
+  $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) closeModal(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('modal').classList.contains('visible')) closeModal(); });
+
+  $('btnSend').addEventListener('click', async () => {
+    if (!currentEntry) return;
+    const roomCode = $('modalRoom').value;
+    if (!roomCode) { alert('Aucun salon selectionne'); return; }
+    $('btnSend').disabled = true;
+    $('btnSend').textContent = 'Envoi...';
+    const res = await window.memedrop.librarySend({
+      mediaUrl: currentEntry.mediaUrl,
+      text: $('modalText').value.trim(),
+      roomCode
+    });
+    $('btnSend').disabled = false;
+    $('btnSend').textContent = 'Envoyer';
+    if (res.ok) {
+      closeModal();
+    } else {
+      alert('Echec : ' + (res.body?.error || res.status));
+    }
+  });
+
+  $('search').addEventListener('input', renderGrid);
+  $('btnRefresh').addEventListener('click', load);
+
+  load();
+</script>
+</body>
+</html>
