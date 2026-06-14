@@ -834,22 +834,26 @@ const server = http.createServer(async (req, res) => {
         if (!channel || !channel.send) return send(res, 502, { error: 'channel_unavailable' });
         const content = [text, mediaUrl].filter(Boolean).join('\n');
 
-        // Reprendre l'identite (pseudo + avatar) de l'auteur original du meme.
+        // Determine l'identite a afficher : senderName du body > auteur original > rien
+        const senderName = (body.senderName && String(body.senderName).trim()) || null;
+        const senderAvatar = (body.senderAvatarUrl && String(body.senderAvatarUrl).trim()) || null;
         const entryHash = libraryHash(mediaUrl);
         const entry = library.find((e) => e.id === entryHash);
-        const authorName = entry?.author?.name || null;
-        const authorAvatar = entry?.author?.avatarUrl || null;
+        const fallbackName = entry?.author?.name || null;
+        const fallbackAvatar = entry?.author?.avatarUrl || null;
+        const finalName = senderName || fallbackName;
+        const finalAvatar = senderAvatar || fallbackAvatar;
 
-        // Tente d'utiliser un webhook pour poster sous l'identite du user original
-        if (authorName) {
+        // Tente d'utiliser un webhook pour poster sous l'identite choisie
+        if (finalName) {
           const webhook = await getOrCreateRelayWebhook(channel);
           if (webhook) {
             try {
-              const safeName = String(authorName).slice(0, 80);
+              const safeName = String(finalName).slice(0, 80);
               await webhook.send({
                 content,
                 username: safeName,
-                avatarURL: authorAvatar || undefined
+                avatarURL: finalAvatar || undefined
               });
               return send(res, 200, { ok: true, via: 'webhook' });
             } catch (e) {

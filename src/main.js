@@ -35,7 +35,9 @@ const store = new Store({
     autoLaunch: true,
     volume: 80,        // 0-100
     muted: false,
-    disabled: false
+    disabled: false,
+    displayName: '',           // pseudo pour les renvois depuis la bibliotheque
+    displayAvatarUrl: ''       // URL avatar optionnel pour les renvois
   }
 });
 
@@ -966,9 +968,22 @@ ipcMain.handle('library:send', async (_e, data) => {
     body: JSON.stringify({
       mediaUrl: data.mediaUrl || '',
       text: data.text || '',
-      roomCode: data.roomCode || ''
+      roomCode: data.roomCode || '',
+      senderName: (store.get('displayName') || '').trim(),
+      senderAvatarUrl: (store.get('displayAvatarUrl') || '').trim()
     })
   });
+});
+
+ipcMain.handle('identity:get', () => ({
+  displayName: store.get('displayName') || '',
+  displayAvatarUrl: store.get('displayAvatarUrl') || ''
+}));
+
+ipcMain.handle('identity:set', (_e, data) => {
+  if (typeof data?.displayName === 'string') store.set('displayName', data.displayName.trim());
+  if (typeof data?.displayAvatarUrl === 'string') store.set('displayAvatarUrl', data.displayAvatarUrl.trim());
+  return true;
 });
 
 ipcMain.handle('library:rooms', () => {

@@ -40,6 +40,10 @@ contextBridge.exposeInMainWorld('memedrop', {
   librarySend: (data) => ipcRenderer.invoke('library:send', data),
   libraryRooms: () => ipcRenderer.invoke('library:rooms'),
 
+  // Identity (pour les renvois depuis la library)
+  getIdentity: () => ipcRenderer.invoke('identity:get'),
+  setIdentity: (data) => ipcRenderer.invoke('identity:set', data),
+
   // User panel
   getUserState: () => ipcRenderer.invoke('user:get-state'),
   onUserState: (cb) => ipcRenderer.on('user:state', (_e, data) => cb(data)),

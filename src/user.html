@@ -412,6 +412,15 @@
   </div>
 
   <div class="section">
+    <h2>Mon identite (pour la bibliotheque)</h2>
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <input type="text" id="identityName" placeholder="Pseudo (apparait quand tu renvoies un meme)" style="width:100%;box-sizing:border-box;padding:9px 11px;background:#2a2c3c;border:1px solid #3a3d52;border-radius:7px;color:#fff;font-size:13px;outline:none;" />
+      <input type="text" id="identityAvatar" placeholder="URL d'avatar (optionnel)" style="width:100%;box-sizing:border-box;padding:9px 11px;background:#2a2c3c;border:1px solid #3a3d52;border-radius:7px;color:#fff;font-size:13px;outline:none;" />
+      <div style="font-size:11px;color:#7c8099;">Si vide, on prend l'identite de l'auteur original du meme.</div>
+    </div>
+  </div>
+
+  <div class="section">
     <div class="toggle-row">
       <div class="toggle-label">
         Recevoir les memes
@@ -576,7 +585,24 @@
     applyState(s);
     renderRooms();
     renderAudio();
+    const id = await window.memedrop.getIdentity();
+    $('identityName').value = id.displayName || '';
+    $('identityAvatar').value = id.displayAvatarUrl || '';
   }
+
+  // Sauvegarde l'identite a chaque modification (debounced)
+  let identityTimer = null;
+  function scheduleIdentitySave() {
+    if (identityTimer) clearTimeout(identityTimer);
+    identityTimer = setTimeout(() => {
+      window.memedrop.setIdentity({
+        displayName: $('identityName').value.trim(),
+        displayAvatarUrl: $('identityAvatar').value.trim()
+      });
+    }, 500);
+  }
+  $('identityName').addEventListener('input', scheduleIdentitySave);
+  $('identityAvatar').addEventListener('input', scheduleIdentitySave);
 
   $('volSlider').addEventListener('input', async () => {
     state.volume = Number($('volSlider').value);
