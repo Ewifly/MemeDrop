@@ -384,11 +384,29 @@ async function resolveTwitterMedia(originalUrl) {
   return null;
 }
 
+// Hostnames de CDN connus qui servent du media sans extension dans le path
+const CDN_VIDEO_HOSTS = /(?:tiktokcdn|tiktokcdn-us|tiktokv|muscdn)/i;
+const CDN_IMAGE_HOSTS = /(?:i\.imgur\.com|media\.tenor\.com)/i;
+
 function pickMediaFromUrl(url) {
   const cleaned = url.split('?')[0].split('#')[0];
   if (MEDIA_RE.image.test(cleaned)) return { url, kind: 'image' };
   if (MEDIA_RE.video.test(cleaned)) return { url, kind: 'video' };
   if (MEDIA_RE.audio.test(cleaned)) return { url, kind: 'audio' };
+
+  // Detection via le parametre mime_type (CDN qui ne mettent pas d'extension dans le path)
+  if (/[?&]mime_type=video/i.test(url)) return { url, kind: 'video' };
+  if (/[?&]mime_type=image/i.test(url)) return { url, kind: 'image' };
+  if (/[?&]mime_type=audio/i.test(url)) return { url, kind: 'audio' };
+
+  // Detection via le hostname (CDN connus)
+  try {
+    const u = new URL(url);
+    const h = u.hostname.toLowerCase();
+    if (CDN_VIDEO_HOSTS.test(h)) return { url, kind: 'video' };
+    if (CDN_IMAGE_HOSTS.test(h)) return { url, kind: 'image' };
+  } catch (_) {}
+
   return null;
 }
 
