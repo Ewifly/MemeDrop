@@ -315,24 +315,26 @@
     return Math.min(MAX_DURATION_MS, Math.max(2000, ms));
   }
 
-  function render({ mediaUrl, mediaKind, audioUrl, text, author, source, duration, forceDuration, volume, muted }) {
+  function render({ mediaUrl, mediaKind, audioUrl, text, author, source, duration, forceDuration, startTime, volume, muted }) {
     clearStage();
     textEl.textContent = text || '';
     renderAuthor(author, source);
 
     const cfgMs = Math.max(2000, Number(duration) || 8000);
     const force = !!forceDuration;
+    const startSec = typeof startTime === 'number' && startTime > 0 ? startTime : 0;
     currentVolume = Math.max(0, Math.min(100, Number(volume ?? 80)));
     currentMuted = !!muted;
     const vol = currentVolume / 100;
 
     // Choisit la duree finale selon le type de media :
     // - forceDuration -> cfgMs tel quel (commande Discord ":Ns")
-    // - video/audio/image-audio -> duree exacte du media (cap 60s)
+    // - video/audio/image-audio -> duree restante du media depuis startSec (cap 60s)
     // - image/texte -> cfgMs (defaut config user)
     function pickDuration(mediaMs) {
       if (force) return cfgMs;
-      if (mediaMs && isFinite(mediaMs) && mediaMs > 0) return capMs(mediaMs);
+      const remaining = mediaMs ? Math.max(0, mediaMs - startSec * 1000) : 0;
+      if (remaining && isFinite(remaining) && remaining > 0) return capMs(remaining);
       return capMs(cfgMs);
     }
 
@@ -392,6 +394,9 @@
       v.controls = false;
       v.onloadedmetadata = () => {
         const mediaMs = (v.duration && isFinite(v.duration)) ? v.duration * 1000 : 0;
+        if (startSec > 0 && (!isFinite(v.duration) || startSec < v.duration)) {
+          try { v.currentTime = startSec; } catch (_) {}
+        }
         showStage();
         scheduleHide(pickDuration(mediaMs));
       };
@@ -411,6 +416,9 @@
       a.volume = vol;
       a.onloadedmetadata = () => {
         const mediaMs = (a.duration && isFinite(a.duration)) ? a.duration * 1000 : 0;
+        if (startSec > 0 && (!isFinite(a.duration) || startSec < a.duration)) {
+          try { a.currentTime = startSec; } catch (_) {}
+        }
         showStage();
         scheduleHide(pickDuration(mediaMs));
       };
@@ -447,7 +455,13 @@
         a.muted = currentMuted;
         a.volume = vol;
         a.loop = false;
-        a.onloadedmetadata = () => { audioReady = true; tryStart(); };
+        a.onloadedmetadata = () => {
+          if (startSec > 0 && (!isFinite(a.duration) || startSec < a.duration)) {
+            try { a.currentTime = startSec; } catch (_) {}
+          }
+          audioReady = true;
+          tryStart();
+        };
         a.onerror = () => { audioReady = true; tryStart(); };
         a.play().catch(() => {});
         currentAudioEl = a;

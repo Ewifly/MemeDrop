@@ -319,14 +319,38 @@ function parseCustomDuration(text) {
   return { text: cleaned, duration };
 }
 
+// Parse une commande de timestamp de depart en fin de texte: "/5", "/30"
+// Retourne { text: texteNettoye, startTime: secondsNumber | null }
+// Necessite un espace avant le '/' pour ne pas confondre avec une URL.
+function parseStartTime(text) {
+  if (!text) return { text: text || '', startTime: null };
+  const re = /\s+\/(\d{1,3})\s*$/i;
+  const m = text.match(re);
+  if (!m) return { text, startTime: null };
+  const n = parseInt(m[1], 10);
+  if (isNaN(n) || n < 0) return { text, startTime: null };
+  const cleaned = text.replace(re, '').trim();
+  return { text: cleaned, startTime: n };
+}
+
 async function handleIncomingMessage(message) {
   const room = findRoomByChannelId(message.channelId);
   if (!room) return; // ce channel n'est pas mappe a une room
 
   const rawText = (message.content || '').trim();
-  const parsed = parseCustomDuration(rawText);
-  const text = parsed.text;
-  const customDuration = parsed.duration; // ms ou null
+  // Parse les commandes en fin de texte : ":Ns" pour duree, "/N" pour timestamp de depart.
+  // Les deux peuvent etre combines dans n'importe quel ordre.
+  let textAfterCmds = rawText;
+  let customDuration = null;
+  let startTime = null;
+  for (let i = 0; i < 2; i++) {
+    const dur = parseCustomDuration(textAfterCmds);
+    if (dur.duration != null) { customDuration = dur.duration; textAfterCmds = dur.text; continue; }
+    const st = parseStartTime(textAfterCmds);
+    if (st.startTime != null) { startTime = st.startTime; textAfterCmds = st.text; continue; }
+    break;
+  }
+  const text = textAfterCmds;
   const author = {
     name: message.member?.displayName || message.author.globalName || message.author.username,
     avatarUrl: message.author.displayAvatarURL({ size: 128, extension: 'png' })
@@ -343,12 +367,14 @@ async function handleIncomingMessage(message) {
   // helper pour construire le payload meme avec la duration custom propagee
   // forceDuration: true indique au client d'utiliser duration tel quel
   // (sans le combiner avec la duree du media)
+  // startTime: secondes pour demarrer la lecture (video/audio) plus tard
   const meme = (extra) => ({
     type: 'meme',
     author,
     source,
     duration: customDuration,
     forceDuration: customDuration != null,
+    startTime,
     ...extra
   });
 
