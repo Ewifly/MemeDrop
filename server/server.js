@@ -875,7 +875,8 @@ const server = http.createServer(async (req, res) => {
         const channel = discordClient.channels.cache.get(room.channelId)
           || await discordClient.channels.fetch(room.channelId);
         if (!channel || !channel.send) return send(res, 502, { error: 'channel_unavailable' });
-        const content = [text, mediaUrl].filter(Boolean).join('\n');
+        // URL en premier, texte + commandes (:Ns, /N) en fin pour que le parser les detecte
+        const content = [mediaUrl, text].filter(Boolean).join('\n');
 
         // Determine l'identite a afficher :
         // 1. Discord User ID fourni -> fetch via API (pseudo + avatar reels)
