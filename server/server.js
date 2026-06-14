@@ -23,6 +23,7 @@ let discordClient = null;
 let reconnectTimer = null;
 let discordStatus = 'stopped';
 let discordTag = '';
+const ownWebhookIds = new Set(); // IDs des webhooks que nous avons crees/utilises
 
 const wss = new WebSocketServer({ noServer: true });
 const clients = new Set();
@@ -75,6 +76,24 @@ function libraryHash(s) {
     h = ((h << 5) - h + s.charCodeAt(i)) | 0;
   }
   return 'e' + Math.abs(h).toString(36);
+}
+
+// Recupere ou cree un webhook "MemeDrop Relay" pour pouvoir poster avec un
+// pseudo + avatar custom (= l'auteur original du meme).
+// Requiert la permission Manage Webhooks sur le bot dans le channel.
+async function getOrCreateRelayWebhook(channel) {
+  try {
+    const all = await channel.fetchWebhooks();
+    let wh = all.find((w) => w.name === 'MemeDrop Relay' && w.owner?.id === discordClient.user?.id);
+    if (!wh) {
+      wh = await channel.createWebhook({ name: 'MemeDrop Relay', reason: 'MemeDrop library relay' });
+    }
+    if (wh?.id) ownWebhookIds.add(wh.id);
+    return wh;
+  } catch (e) {
+    console.log('[webhook] fetch/create failed: ' + (e.message || e));
+    return null;
+  }
 }
 
 function addToLibrary({ mediaUrl, mediaKind, audioUrl, text, author, source }) {
@@ -581,8 +600,13 @@ function startDiscord() {
   });
 
   discordClient.on('messageCreate', (message) => {
-    // On accepte nos propres messages (postes via library/send) mais on ignore les autres bots
-    if (message.author.bot && message.author.id !== discordClient.user?.id) return;
+    // On accepte nos propres messages bot ET ceux postes via nos webhooks de relai.
+    // Tous les autres bots sont ignores.
+    if (message.author.bot) {
+      const isOwnBot = message.author.id === discordClient.user?.id;
+      const isOwnWebhook = ownWebhookIds.has(message.webhookId || message.author.id);
+      if (!isOwnBot && !isOwnWebhook) return;
+    }
     handleIncomingMessage(message);
   });
 
@@ -808,10 +832,36 @@ const server = http.createServer(async (req, res) => {
         const channel = discordClient.channels.cache.get(room.channelId)
           || await discordClient.channels.fetch(room.channelId);
         if (!channel || !channel.send) return send(res, 502, { error: 'channel_unavailable' });
-        // On poste le texte + URL (Discord auto-embed)
         const content = [text, mediaUrl].filter(Boolean).join('\n');
+
+        // Reprendre l'identite (pseudo + avatar) de l'auteur original du meme.
+        const entryHash = libraryHash(mediaUrl);
+        const entry = library.find((e) => e.id === entryHash);
+        const authorName = entry?.author?.name || null;
+        const authorAvatar = entry?.author?.avatarUrl || null;
+
+        // Tente d'utiliser un webhook pour poster sous l'identite du user original
+        if (authorName) {
+          const webhook = await getOrCreateRelayWebhook(channel);
+          if (webhook) {
+            try {
+              const safeName = String(authorName).slice(0, 80);
+              await webhook.send({
+                content,
+                username: safeName,
+                avatarURL: authorAvatar || undefined
+              });
+              return send(res, 200, { ok: true, via: 'webhook' });
+            } catch (e) {
+              console.log('[library/send] webhook send failed, falling back: ' + e.message);
+              // continue vers fallback
+            }
+          }
+        }
+
+        // Fallback : poste classique en tant que bot (permission Manage Webhooks manquante ?)
         await channel.send({ content });
-        return send(res, 200, { ok: true });
+        return send(res, 200, { ok: true, via: 'bot' });
       } catch (e) {
         console.error('[library/send] discord error:', e.message);
         return send(res, 500, { error: 'discord_send_failed', detail: e.message });
