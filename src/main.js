@@ -38,7 +38,8 @@ const store = new Store({
     disabled: false,
     displayName: '',           // (legacy, plus utilise) pseudo manuel
     displayAvatarUrl: '',      // (legacy, plus utilise) avatar manuel
-    discordUserId: ''          // Discord User ID : le serveur fetch automatiquement pseudo + avatar
+    discordUserId: '',         // Discord User ID : le serveur fetch automatiquement pseudo + avatar
+    favorites: []              // IDs des entries library mises en favori (local par user)
   }
 });
 
@@ -986,6 +987,26 @@ ipcMain.handle('identity:set', (_e, data) => {
     store.set('discordUserId', cleaned);
   }
   return true;
+});
+
+// Favoris (local par user)
+ipcMain.handle('favorites:get', () => {
+  const favs = store.get('favorites');
+  return Array.isArray(favs) ? favs : [];
+});
+
+ipcMain.handle('favorites:toggle', (_e, id) => {
+  if (!id) return { ok: false };
+  const favs = (store.get('favorites') || []).filter(Boolean);
+  const i = favs.indexOf(id);
+  if (i >= 0) {
+    favs.splice(i, 1);
+    store.set('favorites', favs);
+    return { ok: true, favorited: false };
+  }
+  favs.unshift(id);
+  store.set('favorites', favs);
+  return { ok: true, favorited: true };
 });
 
 ipcMain.handle('library:rooms', () => {

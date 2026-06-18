@@ -44,6 +44,10 @@ contextBridge.exposeInMainWorld('memedrop', {
   getIdentity: () => ipcRenderer.invoke('identity:get'),
   setIdentity: (data) => ipcRenderer.invoke('identity:set', data),
 
+  // Favoris (local par user)
+  getFavorites: () => ipcRenderer.invoke('favorites:get'),
+  toggleFavorite: (id) => ipcRenderer.invoke('favorites:toggle', id),
+
   // User panel
   getUserState: () => ipcRenderer.invoke('user:get-state'),
   onUserState: (cb) => ipcRenderer.on('user:state', (_e, data) => cb(data)),

@@ -57,6 +57,11 @@
     font-size: 12.5px;
   }
   .header button:hover { background: #34374a; }
+  .header button.active {
+    background: linear-gradient(135deg, #5865F2, #eb459e);
+    border-color: #5865F2;
+    color: #fff;
+  }
 
   .grid-wrap {
     flex: 1 1 auto;
@@ -110,6 +115,27 @@
     text-transform: uppercase;
     letter-spacing: 0.4px;
   }
+  .card .fav-btn {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 100ms, background 100ms;
+    padding: 0;
+    line-height: 1;
+  }
+  .card .fav-btn:hover { background: rgba(0,0,0,0.8); transform: scale(1.1); }
+  .card .fav-btn.active { color: #f5c85c; }
   .card .info {
     padding: 8px 10px 10px;
   }
@@ -235,6 +261,7 @@
     <h1>Bibliotheque</h1>
     <div class="count" id="count"></div>
     <input type="text" id="search" placeholder="Rechercher dans les textes..." />
+    <button id="btnFavOnly" title="Afficher uniquement les favoris">★ Favoris</button>
     <button id="btnRefresh">Rafraichir</button>
   </div>
   <div class="grid-wrap">
@@ -264,6 +291,8 @@
   let entries = [];
   let rooms = [];
   let currentEntry = null;
+  let favorites = new Set();
+  let favOnly = false;
 
   function escapeHtml(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -289,35 +318,62 @@
     const authorBlock = e.author?.name
       ? `<div class="meta">${e.author.avatarUrl ? `<img src="${escapeHtml(e.author.avatarUrl)}" />` : ''}<span>${escapeHtml(e.author.name)}</span></div>`
       : '';
+    const isFav = favorites.has(e.id);
     card.innerHTML = `
-      <div class="thumb">${thumbHtml}<div class="badge-kind">${escapeHtml(badge)}</div></div>
+      <div class="thumb">
+        ${thumbHtml}
+        <button class="fav-btn ${isFav ? 'active' : ''}" data-fav title="${isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}">${isFav ? '★' : '☆'}</button>
+        <div class="badge-kind">${escapeHtml(badge)}</div>
+      </div>
       <div class="info">
         <div class="text">${escapeHtml(e.text || '(sans texte)')}</div>
         ${authorBlock}
       </div>
     `;
-    card.addEventListener('click', () => openModal(e));
+    card.addEventListener('click', (ev) => {
+      // Ignore le clic si c'est sur le bouton favori
+      if (ev.target.closest('[data-fav]')) return;
+      openModal(e);
+    });
+    const favBtn = card.querySelector('[data-fav]');
+    favBtn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const res = await window.memedrop.toggleFavorite(e.id);
+      if (res.ok) {
+        if (res.favorited) favorites.add(e.id);
+        else favorites.delete(e.id);
+        renderGrid();
+      }
+    });
     return card;
   }
 
   function renderGrid() {
     const q = $('search').value.trim().toLowerCase();
-    const filtered = q
-      ? entries.filter((e) => (e.text || '').toLowerCase().includes(q) || (e.author?.name || '').toLowerCase().includes(q))
-      : entries;
+    let filtered = entries;
+    if (favOnly) filtered = filtered.filter((e) => favorites.has(e.id));
+    if (q) filtered = filtered.filter((e) => (e.text || '').toLowerCase().includes(q) || (e.author?.name || '').toLowerCase().includes(q));
     grid.innerHTML = '';
     if (filtered.length === 0) {
+      $('empty').textContent = favOnly && entries.length > 0
+        ? 'Aucun favori. Clique sur l\'etoile d\'une card pour l\'ajouter.'
+        : 'Aucun media en bibliotheque pour l\'instant.';
       $('empty').style.display = 'block';
     } else {
       $('empty').style.display = 'none';
       for (const e of filtered) grid.appendChild(renderCard(e));
     }
-    $('count').textContent = `${entries.length} media${entries.length > 1 ? 's' : ''}`;
+    const favCount = favorites.size;
+    $('count').textContent = `${entries.length} media${entries.length > 1 ? 's' : ''}${favCount > 0 ? ` (${favCount} ★)` : ''}`;
   }
 
   async function load() {
     grid.innerHTML = '<div class="empty">Chargement...</div>';
-    const res = await window.memedrop.libraryList({ limit: 500 });
+    const [res, favs] = await Promise.all([
+      window.memedrop.libraryList({ limit: 500 }),
+      window.memedrop.getFavorites()
+    ]);
+    favorites = new Set(favs || []);
     if (!res.ok) {
       grid.innerHTML = '<div class="empty">Erreur : ' + (res.body?.error || res.status) + '</div>';
       return;
@@ -402,6 +458,11 @@
 
   $('search').addEventListener('input', renderGrid);
   $('btnRefresh').addEventListener('click', load);
+  $('btnFavOnly').addEventListener('click', () => {
+    favOnly = !favOnly;
+    $('btnFavOnly').classList.toggle('active', favOnly);
+    renderGrid();
+  });
 
   load();
 </script>
