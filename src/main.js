@@ -19,7 +19,7 @@ const APP_ADMIN_PASSWORD = 'TonMdpAdmin';
 
 // Repo GitHub (owner/repo) public qui heberge les .exe releases pour l'auto-update.
 const UPDATE_REPO = 'LCournollet/memedrop-releases';
-const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
+const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 min
 // =============================================================================
 
 const store = new Store({
@@ -341,6 +341,10 @@ function handleWsMessage(msg) {
     if (msg.room) roomNameByCode[msg.room] = msg.roomName || null;
     notifyUserState();
     notifyAdminStatus();
+  }
+  if (msg.type === 'update-available') {
+    // Le serveur a detecte une nouvelle release sur GitHub -> on re-check immediat
+    checkForUpdate();
   }
   if (msg.type === 'meme') {
     showMeme({
