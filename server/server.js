@@ -463,10 +463,12 @@ function parseCustomDuration(text) {
 
 // Parse une commande de timestamp de depart en fin de texte: "/5", "/30"
 // Retourne { text: texteNettoye, startTime: secondsNumber | null }
-// Necessite un espace avant le '/' pour ne pas confondre avec une URL.
+// Si le texte contient une URL, on exige un espace devant le '/' pour ne pas
+// matcher la fin d'une URL. Sinon (attachment seul), on accepte sans espace.
 function parseStartTime(text) {
   if (!text) return { text: text || '', startTime: null };
-  const re = /\s+\/(\d{1,3})\s*$/i;
+  const hasUrl = /https?:\/\//i.test(text);
+  const re = hasUrl ? /\s+\/(\d{1,3})\s*$/i : /\s*\/(\d{1,3})\s*$/i;
   const m = text.match(re);
   if (!m) return { text, startTime: null };
   const n = parseInt(m[1], 10);
