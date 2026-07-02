@@ -19,7 +19,7 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 const APP_ADMIN_PASSWORD = 'TonMdpAdmin';
 
 // Repo GitHub (owner/repo) public qui heberge les .exe releases pour l'auto-update.
-const UPDATE_REPO = 'LCournollet/memedrop-releases';
+const UPDATE_REPO = 'Ewifly/MemeDrop';
 const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 min
 // =============================================================================
 
