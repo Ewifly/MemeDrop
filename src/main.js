@@ -10,8 +10,9 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 // =============================================================================
 // CONSTANTES A EDITER AVANT DE BUILD POUR DISTRIBUTION
 // =============================================================================
-// URL du serveur MemeDrop (mets celle de ton VPS avant de build le .exe pour tes potes)
-const DEFAULT_SERVER_URL = 'ws://57.131.40.94:8787';
+// Pas d'URL serveur en dur : elle est configuree soit via le panneau Admin,
+// soit automatiquement au premier salon rejoint via un code d'invitation
+// du type "moncode@wss://mon-serveur" (voir parseInviteCode plus bas).
 
 // Mot de passe en dur qui protege l'acces au panneau admin de l'app cliente.
 // Change-le avant de distribuer le .exe a tes amis.
@@ -25,7 +26,7 @@ const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 min
 const store = new Store({
   defaults: {
     mode: null, // null | 'admin' | 'user'
-    serverUrl: DEFAULT_SERVER_URL,
+    serverUrl: '',
     serverAdminPassword: '',
     userCode: '',
     userCodes: [],     // multi-salon : liste des codes (priorite sur userCode legacy)
