@@ -106,6 +106,8 @@
   .btn-secondary:hover { background: #34374a; }
   .btn-danger { background: #4a1f1f; color: #f06363; border: 1px solid #6e2a2a; }
   .btn-danger:hover { background: #5a2727; }
+  .btn-invite { background: #1f3a4d; color: #5cc3f5; border: 1px solid #2a5a75; margin-right: 6px; }
+  .btn-invite:hover { background: #26485e; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .badge {
@@ -410,13 +412,33 @@
         <td>${escapeHtml(r.name || '-')}</td>
         <td class="channel-cell">${escapeHtml(r.channelId)}</td>
         <td>${r.connectedClients ?? 0}</td>
-        <td><button class="btn-danger" data-code="${escapeHtml(r.code)}">Supprimer</button></td>
+        <td>
+          <button class="btn-invite" data-code="${escapeHtml(r.code)}">Copier l'invitation</button>
+          <button class="btn-danger" data-code="${escapeHtml(r.code)}">Supprimer</button>
+        </td>
       `;
       body.appendChild(tr);
     }
-    body.querySelectorAll('button[data-code]').forEach((b) => {
+    body.querySelectorAll('button.btn-invite').forEach((b) => {
+      b.addEventListener('click', () => copyInvite(b.dataset.code));
+    });
+    body.querySelectorAll('button.btn-danger').forEach((b) => {
       b.addEventListener('click', () => deleteRoom(b.dataset.code));
     });
+  }
+
+  // Construit une chaine "code@wss://serveur" pretes a coller dans l'app
+  // d'un ami, qui configure automatiquement le bon serveur cote User.
+  async function copyInvite(code) {
+    const url = $('serverUrl').value.trim();
+    if (!url) { alert('Renseigne et sauvegarde une URL serveur avant de generer une invitation.'); return; }
+    const invite = `${code}@${url}`;
+    try {
+      await navigator.clipboard.writeText(invite);
+      alert('Invitation copiee : ' + invite);
+    } catch (_) {
+      prompt('Copie ce code d\'invitation :', invite);
+    }
   }
 
   function escapeHtml(s) {

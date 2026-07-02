@@ -1,0 +1,22 @@
+services:
+  memedrop-server:
+    build: .
+    container_name: memedrop-server
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      - PORT=8787
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - CONFIG_PATH=/data/config.json
+    volumes:
+      - memedrop-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8787/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  memedrop-data:

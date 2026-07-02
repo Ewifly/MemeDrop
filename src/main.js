@@ -335,6 +335,26 @@ function feedBaseUrl() {
   return base.replace(/\/+$/, '') + '/feed';
 }
 
+// Parse un code d'invitation qui peut etre soit un simple code de salon
+// ("lycee2025"), soit un code compose avec l'URL du serveur
+// ("lycee2025@wss://mon-serveur.exemple.com"). Ca permet a un admin de
+// partager une seule chaine a copier-coller a ses amis, qui configure
+// automatiquement le bon serveur cote User.
+function parseInviteCode(raw) {
+  const s = String(raw || '').trim();
+  const atIndex = s.indexOf('@');
+  if (atIndex === -1) return { code: s, serverUrl: null };
+  const code = s.slice(0, atIndex).trim();
+  const maybeUrl = s.slice(atIndex + 1).trim();
+  if (/^wss?:\/\//i.test(maybeUrl)) {
+    return { code, serverUrl: maybeUrl.replace(/\/+$/, '') };
+  }
+  // Partie apres @ ne ressemble pas a une URL ws(s) valide : on garde
+  // la chaine complete comme code plutot que de risquer de couper un
+  // code de salon qui contiendrait un @ pour une autre raison.
+  return { code: s, serverUrl: null };
+}
+
 function handleWsMessage(msg) {
   if (msg.type === 'hello') {
     serverBotStatus = msg.status || serverBotStatus;
@@ -846,8 +866,9 @@ function createTray() {
 // --- IPC ---
 
 ipcMain.handle('welcome:choose-user', (_e, code) => {
-  const c = String(code || '').trim();
+  const { code: c, serverUrl } = parseInviteCode(code);
   if (!c) return false;
+  if (serverUrl) store.set('serverUrl', serverUrl);
   store.set('mode', 'user');
   store.set('userCode', c); // legacy compat
   store.set('userCodes', [c]);
@@ -881,13 +902,16 @@ ipcMain.handle('user:get-state', () => ({
 }));
 
 ipcMain.handle('user:add-code', (_e, code) => {
-  const c = String(code || '').trim();
+  const { code: c, serverUrl } = parseInviteCode(code);
   if (!c) return { ok: false, error: 'empty' };
   const codes = (store.get('userCodes') || []).map(String);
   if (codes.includes(c)) return { ok: false, error: 'duplicate' };
+  const urlChanged = serverUrl && serverUrl !== store.get('serverUrl');
+  if (serverUrl) store.set('serverUrl', serverUrl);
   codes.push(c);
   store.set('userCodes', codes);
-  connectUserWs(c);
+  if (urlChanged) connectAllWs();
+  else connectUserWs(c);
   notifyUserState();
   return { ok: true };
 });
@@ -1035,7 +1059,7 @@ ipcMain.handle('admin:get-state', () => ({
   overlayPosition: store.get('overlayPosition'),
   overlayDurationMs: store.get('overlayDurationMs'),
   autoLaunch: store.get('autoLaunch'),
-  wsState
+  wsState: wsAdminState
 }));
 
 ipcMain.handle('admin:save-local', (_e, data) => {

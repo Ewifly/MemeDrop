@@ -362,11 +362,22 @@
   </div>
 
   <div class="section">
+    <h2>Serveur</h2>
+    <div class="add-room-row">
+      <input type="text" id="serverUrlInput" placeholder="ws://... ou wss://..." autocomplete="off" style="font-family:'Cascadia Code',Consolas,monospace;font-size:12px;" />
+      <button id="btnSaveServerUrl">Enregistrer</button>
+    </div>
+    <div style="font-size:11px;color:#7c8099;line-height:1.4;margin-top:6px;">
+      L'URL que ton admin t'a donnee pour rejoindre son serveur.
+    </div>
+  </div>
+
+  <div class="section">
     <h2>Salons connectes</h2>
     <div class="rooms-list" id="roomsList"></div>
     <div class="rooms-empty" id="roomsEmpty">Aucun salon. Ajoute-en un ci-dessous.</div>
     <div class="add-room-row">
-      <input type="text" id="newCodeInput" placeholder="Code d'un autre salon" autocomplete="off" />
+      <input type="text" id="newCodeInput" placeholder="Code ou invitation (code@wss://...)" autocomplete="off" />
       <button id="btnAddCode">Ajouter</button>
     </div>
     <div class="status-line" style="margin-top: 12px;">
@@ -590,6 +601,8 @@
     renderAudio();
     const id = await window.memedrop.getIdentity();
     $('identityId').value = id.discordUserId || '';
+    const admin = await window.memedrop.getAdminState();
+    $('serverUrlInput').value = admin.serverUrl || '';
   }
 
   // Sauvegarde l'identite a chaque modification (debounced)
@@ -650,6 +663,15 @@
   }
   $('btnAddCode').addEventListener('click', addCode);
   $('newCodeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addCode(); });
+
+  $('btnSaveServerUrl').addEventListener('click', async () => {
+    const url = $('serverUrlInput').value.trim();
+    if (!url) { alert('URL vide'); return; }
+    $('btnSaveServerUrl').disabled = true;
+    await window.memedrop.saveLocal({ serverUrl: url });
+    $('btnSaveServerUrl').disabled = false;
+    alert('URL serveur enregistree, reconnexion...');
+  });
 
   // Update banner
   function renderUpdate(u) {
