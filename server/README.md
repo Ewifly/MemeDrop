@@ -12,148 +12,80 @@ Backend Node.js : bot Discord + WebSocket broadcast aux clients MemeDrop.
             |
        bot ecoute
             v
-+-------------------------+
-| memedrop-server         |
-| - discord.js (gateway)  |
-| - ws server :8787       |
++-------------------------+                          +-------------------------+
+| memedrop-server (Docker)| <----------------------- |   Amis (MemeDrop client)|
+| - discord.js (gateway)  |                            |   overlay s'affiche     |
+| - ws server :8787       |                            +-------------------------+
 | - admin HTTP API        |
 +-------------------------+
-            |
-   broadcast WebSocket
-            v
-   [Clients MemeDrop]
-   (overlay s'affiche)
 ```
 
-Le serveur reste connecte 24/7 a Discord. Quand tu postes dans le channel, il pousse a tous les clients MemeDrop ouverts. Si t'es pas la, ton serveur tourne quand meme.
+Le serveur tourne en conteneur Docker sur une machine que tu controles (VPS, mini-PC, serveur perso...) et reste connecte 24/7 a Discord. Comment rendre ce serveur joignable par tes amis (port forwarding, reverse proxy, tunnel...) depend de ton infra — pas couvert ici, cette section se concentre sur le service lui-meme.
+
+Quand tu postes dans le channel configure, le serveur pousse le meme a tous les clients MemeDrop connectes au bon salon, meme si tu es hors ligne.
 
 ## Endpoints
 
 - `GET  /health` -> `{ ok: true }`
-- `WS   /feed` -> broadcast des memes aux clients
-- `GET  /admin/status` (header `X-Admin-Password`) -> statut bot + nb clients
-- `POST /admin/config` (header `X-Admin-Password`, body `{ botToken, channelId }`) -> set config + restart bot
+- `WS   /feed` -> broadcast des memes aux clients (parametre `?code=<salon>`)
+- `GET  /admin/status` (header `X-Admin-Password`) -> statut bot + nb clients + salons
+- `POST /admin/token` (header `X-Admin-Password`, body `{ botToken }`) -> set le token et (re)connecte le bot
+- `POST /admin/rooms` (header `X-Admin-Password`, body `{ code, channelId, name? }`) -> cree/met a jour un salon
+- `DELETE /admin/rooms/:code` (header `X-Admin-Password`) -> supprime un salon
 - `POST /admin/test` (header `X-Admin-Password`) -> broadcast un test "Test depuis le panneau admin !"
 
 ## Variables d'environnement
 
-- `PORT` : port HTTP/WS (defaut 8787)
-- `ADMIN_PASSWORD` : mot de passe admin (defaut "123456" - **a changer en prod**)
-- `CONFIG_PATH` : chemin du fichier config persistant (defaut `./config.json`)
+Definies dans `server/.env` (a creer, jamais commit — voir `.env.example`) :
 
-## Deploiement sur Oracle Cloud Free Tier
-
-Oracle donne une VM ARM gratuite a vie (24 GB RAM, 4 vCPU). Etapes :
-
-### 1. Creer le compte et la VM
-
-1. Va sur https://www.oracle.com/cloud/free/
-2. Cree un compte (carte bancaire demandee pour validation, jamais facturee sur Free Tier)
-3. Console Oracle Cloud -> **Compute** -> **Instances** -> **Create instance**
-4. Image : **Canonical Ubuntu 22.04** (ARM minimal)
-5. Shape : **VM.Standard.A1.Flex** (4 OCPU, 24 GB RAM) - tout en gratuit
-6. Reseau : laisse les defauts (cree un VCN si demande)
-7. **Add SSH key** : genere une cle locale avec `ssh-keygen -t ed25519 -f memedrop_key`, upload `memedrop_key.pub`
-8. Note l'**IP publique** affichee apres creation
-
-### 2. Ouvrir le port 8787
-
-Dans Oracle Cloud :
-1. **Networking** -> **Virtual Cloud Networks** -> ton VCN -> **Security Lists** -> Default
-2. **Add Ingress Rules** :
-   - Source CIDR : `0.0.0.0/0`
-   - IP Protocol : TCP
-   - Destination Port Range : `8787`
-3. Save
-
-Sur la VM Ubuntu, autoriser le port dans iptables aussi :
+| Variable         | Defaut                  | Description                                              |
+|------------------|--------------------------|------------------------------------------------------------|
+| `PORT`           | `8787`                   | Port HTTP/WS ecoute par le serveur                        |
+| `ADMIN_PASSWORD` | `123456` (⚠️ a changer)   | Mot de passe qui protege toutes les routes `/admin/*`      |
+| `CONFIG_PATH`    | `/data/config.json`      | Chemin du fichier persistant (token bot, salons). Deja mappe sur le volume Docker, pas besoin d'y toucher. |
 
 ```bash
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8787 -j ACCEPT
-sudo netfilter-persistent save
+cp .env.example .env
+nano .env   # mets un vrai mot de passe, ex: openssl rand -hex 16
 ```
 
-### 3. Installer Node.js + cloner le repo
+## Deploiement avec Docker
 
-SSH dans la VM : `ssh -i memedrop_key ubuntu@<IP_PUBLIQUE>`
+Prerequis : Docker + Docker Compose installes sur la machine hote.
 
 ```bash
-sudo apt update
-sudo apt install -y nodejs npm git
-# Optionnel : Node 20 LTS au lieu de la version d'Ubuntu
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
-git clone <ton-repo>  # ou scp -r le dossier server/
-cd MemeDrop/server
-npm install --omit=dev
+cd server
+cp .env.example .env
+nano .env                       # ADMIN_PASSWORD obligatoire
+docker compose up -d --build
 ```
 
-### 4. Lancer comme service systemd
-
-Cree `/etc/systemd/system/memedrop.service` :
-
-```ini
-[Unit]
-Description=MemeDrop Server
-After=network.target
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/MemeDrop/server
-Environment=PORT=8787
-Environment=ADMIN_PASSWORD=ChangeMoiSTP
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Active et lance :
+Verifie que ca tourne :
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now memedrop
-sudo systemctl status memedrop   # doit afficher "active (running)"
+docker compose ps               # doit afficher "Up (healthy)"
+curl http://localhost:8787/health   # doit repondre {"ok":true}
 ```
 
-Voir les logs en temps reel :
+Le conteneur :
+- redemarre automatiquement (`restart: unless-stopped`) apres un reboot de la machine ou un crash
+- persiste sa config (token, salons) dans un volume Docker nomme (`memedrop-data`), independant du cycle de vie du conteneur
+- tourne avec des limites de ressources (`mem_limit: 256m`, `cpus: 0.5`) pour ne pas impacter d'autres services sur la meme machine
+- expose un healthcheck sur `/health`, verifiable via `docker compose ps`
+
+### Logs
 
 ```bash
-journalctl -u memedrop -f
+docker compose logs -f
 ```
 
-### 5. Tester depuis ton PC
+### Mettre a jour apres un changement de code
 
-Depuis ton PC Windows :
-
-```powershell
-curl http://<IP_PUBLIQUE>:8787/health
+```bash
+docker compose up -d --build
 ```
 
-Doit renvoyer `{"ok":true}`.
-
-### 6. Configurer le bot Discord
-
-Dans l'app MemeDrop (mode Admin) :
-- URL serveur : `ws://<IP_PUBLIQUE>:8787`
-- Mot de passe admin : celui defini dans `ADMIN_PASSWORD` du service systemd
-- Token bot + ID channel : depuis le Discord Developer Portal
-- Clic "Envoyer au serveur"
-
-Le statut doit passer a `connected (TonBot#1234)`.
-
-### 7. Hardening (optionnel, recommande)
-
-- **HTTPS/WSS** : installe Caddy avec un nom de domaine (ou DuckDNS gratuit). Caddy fait l'auto-TLS via Let's Encrypt. Le mdp admin transitera chiffre.
-- **fail2ban** : pour proteger SSH
-- **Mot de passe admin fort** : edite `ADMIN_PASSWORD` dans le service systemd (`sudo systemctl daemon-reload && sudo systemctl restart memedrop`).
-- **Sauvegarde `config.json`** : il contient le token bot (en clair).
-
-## Test local rapide
+## Test local rapide (sans Docker)
 
 ```bash
 cd server
@@ -161,17 +93,11 @@ npm install
 node server.js
 ```
 
-Puis dans l'app cliente, URL serveur = `ws://localhost:8787`.
+Cote client, URL serveur = `ws://localhost:8787`.
 
-## Docker (optionnel)
+## Securite
 
-```bash
-cd server
-docker build -t memedrop-server .
-docker run -d --name memedrop \
-  -p 8787:8787 \
-  -e ADMIN_PASSWORD=ChangeMoi \
-  -v memedrop-data:/data \
-  --restart unless-stopped \
-  memedrop-server
-```
+- Ne commit jamais `.env` ni `server/config.json` (contient le token bot en clair) — deja couverts par `.gitignore`.
+- Change imperativement `ADMIN_PASSWORD` (defaut `123456`).
+- Le token de bot Discord ne quitte jamais ce serveur : seul le panneau Admin du client le pousse via `POST /admin/token`, jamais expose aux clients User.
+- Si tu changes `ADMIN_PASSWORD` dans `.env` apres coup, il faut aussi le remettre a jour dans le panneau Admin du client, sinon les requetes `/admin/*` echouent en `401`.
